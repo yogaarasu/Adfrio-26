@@ -1,0 +1,19 @@
+{
+  "name": "adfrio-media-platform",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:client": "npm run dev --workspace client",
+    "dev:server": "npm run dev --workspace server",
+    "build": "npm run build --workspace server && npm run build --workspace client",
+    "lint": "npm run lint --workspace server && npm run lint --workspace client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,0 +1,40 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 2%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 5%;
+  --card-foreground: 0 0% 98%;
+  --border: 0 0% 20%;
+  --muted: 0 0% 10%;
+  --muted-foreground: 0 0% 70%;
+  --primary: 0 0% 100%;
+  --primary-foreground: 0 0% 0%;
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-family: "Space Grotesk", "Manrope", sans-serif;
+  min-height: 100vh;
+  background-image: radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.08), transparent 45%),
+    radial-gradient(circle at 90% 90%, rgba(255, 255, 255, 0.04), transparent 40%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #ffffff33;
+  border-radius: 999px;
+}
