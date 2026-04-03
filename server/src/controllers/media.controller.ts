@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { getStreamData, normalizeStreams, searchPiped } from "../services/piped.js";
-import { proxyGooglevideoStream } from "../services/stream-proxy.js";
+import { proxyGooglevideoCandidates, proxyGooglevideoStream } from "../services/stream-proxy.js";
 import { sendError } from "../utils/http.js";
 
 const searchSchema = z.object({
@@ -12,6 +12,15 @@ const searchSchema = z.object({
 
 const proxySchema = z.object({
   url: z.string().url()
+});
+
+const proxyByIdSchema = z.object({
+  id: z.string().min(1)
+});
+
+const proxyByIdQuerySchema = z.object({
+  type: z.enum(["audio", "video"]).default("audio"),
+  quality: z.string().optional()
 });
 
 const extractUpstreamMessage = (error: unknown): string | null => {
@@ -150,6 +159,47 @@ export const proxyMediaStream = async (req: Request, res: Response): Promise<voi
     const message = upstream
       ? `Unable to proxy stream right now: ${upstream}`
       : "Unable to proxy stream right now";
+
+    if (!res.headersSent) {
+      return sendError(res, 502, message);
+    }
+  }
+};
+
+export const proxyMediaById = async (req: Request, res: Response): Promise<void | Response> => {
+  const parsedParams = proxyByIdSchema.safeParse(req.params);
+  const parsedQuery = proxyByIdQuerySchema.safeParse(req.query);
+
+  if (!parsedParams.success || !parsedQuery.success) {
+    return sendError(res, 400, "Invalid proxy request");
+  }
+
+  const { id } = parsedParams.data;
+  const { type, quality } = parsedQuery.data;
+
+  try {
+    const rawStreams = await getStreamData(id);
+    const streams = normalizeStreams(rawStreams);
+
+    const candidates =
+      type === "audio"
+        ? [...streams.audio.map((entry) => entry.url), ...streams.video.map((entry) => entry.url)].filter(Boolean)
+        : (() => {
+            const exact = quality ? streams.video.filter((entry) => entry.quality === quality).map((entry) => entry.url) : [];
+            const allVideo = streams.video.map((entry) => entry.url);
+            return [...exact, ...allVideo, ...streams.audio.map((entry) => entry.url)].filter(Boolean);
+          })();
+
+    if (candidates.length === 0) {
+      return sendError(res, 404, "No proxy stream candidates available");
+    }
+
+    await proxyGooglevideoCandidates(req, res, candidates);
+  } catch (error) {
+    const upstream = extractUpstreamMessage(error);
+    const message = upstream
+      ? `Unable to proxy stream by media id right now: ${upstream}`
+      : "Unable to proxy stream by media id right now";
 
     if (!res.headersSent) {
       return sendError(res, 502, message);

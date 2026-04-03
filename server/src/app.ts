@@ -12,10 +12,15 @@ export const app = express();
 app.use(
   cors({
     origin: [env.CLIENT_URL],
-    credentials: true
+    credentials: true,
+    exposedHeaders: ["content-range", "accept-ranges", "content-length", "content-type", "cache-control", "etag"]
   })
 );
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false
+  })
+);
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(

@@ -6,13 +6,11 @@ import { useMediaSession } from "@/hooks/use-media-session";
 import { SleepTimer } from "@/components/player/sleep-timer";
 import { mediaApi } from "@/services/api";
 import { pickBestAudioSource } from "@/lib/playback";
-import { getGooglevideoFallbackUrls } from "@/lib/googlevideo-fallback";
+import { buildMediaProxyUrl } from "@/lib/proxy-stream-url";
 
 export const GlobalAudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recoveredIdRef = useRef<string | null>(null);
-  const fallbackUrlsRef = useRef<string[]>([]);
-  const triedFallbackUrlsRef = useRef<Set<string>>(new Set());
 
   const current = usePlayerStore((state) => state.current);
   const audio = usePlayerStore((state) => state.audio);
@@ -34,17 +32,6 @@ export const GlobalAudioPlayer = () => {
       recoveredIdRef.current = null;
     }
   }, [current?.id]);
-
-  useEffect(() => {
-    if (!audio?.url) {
-      fallbackUrlsRef.current = [];
-      triedFallbackUrlsRef.current = new Set();
-      return;
-    }
-
-    fallbackUrlsRef.current = getGooglevideoFallbackUrls(audio.url, 8);
-    triedFallbackUrlsRef.current = new Set([audio.url]);
-  }, [audio?.url]);
 
   useEffect(() => {
     if (!audioRef.current) return;
@@ -71,17 +58,6 @@ export const GlobalAudioPlayer = () => {
     }
   }, [audio?.url, playing, setPlaying, video.active]);
 
-  const tryNextMirror = useCallback((): boolean => {
-    if (!current || !audio) return false;
-
-    const nextUrl = fallbackUrlsRef.current.find((candidate) => !triedFallbackUrlsRef.current.has(candidate));
-    if (!nextUrl) return false;
-
-    triedFallbackUrlsRef.current.add(nextUrl);
-    playAudio(current, { url: nextUrl, mimeType: audio.mimeType }, queue);
-    return true;
-  }, [audio, current, playAudio, queue]);
-
   const recoverCurrentTrack = useCallback(async () => {
     if (!current) return;
     if (recoveredIdRef.current === current.id) {
@@ -104,7 +80,7 @@ export const GlobalAudioPlayer = () => {
         return;
       }
 
-      playAudio(current, { url: bestAudio.url, mimeType: bestAudio.mimeType }, queue);
+      playAudio(current, { url: buildMediaProxyUrl(current.id, "audio"), mimeType: bestAudio.mimeType }, queue);
     } catch {
       setPlaying(false);
     }
@@ -132,7 +108,7 @@ export const GlobalAudioPlayer = () => {
           return;
         }
 
-        playAudio(next, { url: bestAudio.url, mimeType: bestAudio.mimeType }, queue);
+        playAudio(next, { url: buildMediaProxyUrl(next.id, "audio"), mimeType: bestAudio.mimeType }, queue);
       } catch {
         setPlaying(false);
       }
@@ -154,7 +130,6 @@ export const GlobalAudioPlayer = () => {
         onTimeUpdate={(event) => setProgress(event.currentTarget.currentTime, event.currentTarget.duration || 0)}
         onEnded={() => void jump(1)}
         onError={() => {
-          if (tryNextMirror()) return;
           void recoverCurrentTrack();
         }}
       />

@@ -4,6 +4,7 @@ import { mediaApi, playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
 import type { MediaItem, MediaType } from "@/types/media";
 import { pickBestAudioSource, pickPlayableVideoSources } from "@/lib/playback";
+import { buildMediaProxyUrl } from "@/lib/proxy-stream-url";
 import { SearchBox } from "@/components/media/search-box";
 import { MediaCard } from "@/components/media/media-card";
 import { useMediaSearch } from "@/hooks/use-media-search";
@@ -112,12 +113,12 @@ export const MediaPage = ({ type }: Props) => {
           return;
         }
 
-        playAudio(item, { url: bestAudio.url, mimeType: bestAudio.mimeType }, items);
+        playAudio(item, { url: buildMediaProxyUrl(item.id, "audio"), mimeType: bestAudio.mimeType }, items);
         return;
       }
 
       setPlaying(false);
-      const sources = pickPlayableVideoSources(
+      const rawSources = pickPlayableVideoSources(
         stream.video.map((entry) => ({
           url: entry.url,
           quality: entry.quality,
@@ -125,12 +126,18 @@ export const MediaPage = ({ type }: Props) => {
         }))
       );
 
-      if (sources.length === 0) {
+      if (rawSources.length === 0) {
         setActionMessage("Video stream unavailable for this item.");
         return;
       }
 
-      playVideo(item, sources, stream.related ?? []);
+      const proxiedSources = rawSources.map((entry) => ({
+        url: buildMediaProxyUrl(item.id, "video", entry.quality),
+        quality: entry.quality,
+        format: entry.format
+      }));
+
+      playVideo(item, proxiedSources, stream.related ?? []);
     } catch (error) {
       if (requestToken !== requestTokenRef.current) return;
       if (mediaApi.isCanceledError(error)) return;

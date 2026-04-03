@@ -6,7 +6,7 @@ import { mediaApi } from "@/services/api";
 import type { MediaItem } from "@/types/media";
 import { formatDuration } from "@/lib/utils";
 import { pickPlayableVideoSources } from "@/lib/playback";
-import { getGooglevideoFallbackUrls } from "@/lib/googlevideo-fallback";
+import { buildMediaProxyUrl } from "@/lib/proxy-stream-url";
 
 export const GlobalVideoPlayer = () => {
   const current = usePlayerStore((state) => state.current);
@@ -18,12 +18,9 @@ export const GlobalVideoPlayer = () => {
   const [relatedError, setRelatedError] = useState<string | null>(null);
   const [loadingRelatedId, setLoadingRelatedId] = useState<string | null>(null);
   const [selectedQuality, setSelectedQuality] = useState<string>("");
-  const [runtimeSourceUrl, setRuntimeSourceUrl] = useState<string>("");
 
   const playerRef = useRef<HTMLVideoElement | null>(null);
   const recoveredIdRef = useRef<string | null>(null);
-  const fallbackUrlsRef = useRef<string[]>([]);
-  const triedFallbackUrlsRef = useRef<Set<string>>(new Set());
 
   const isOpen = video.active && video.sources.length > 0;
 
@@ -61,27 +58,14 @@ export const GlobalVideoPlayer = () => {
   const activeSource = sourceOptions.find((entry) => entry.quality === selectedQuality) ?? sourceOptions[0] ?? null;
 
   useEffect(() => {
-    if (!activeSource?.url) {
-      setRuntimeSourceUrl("");
-      fallbackUrlsRef.current = [];
-      triedFallbackUrlsRef.current = new Set();
-      return;
-    }
-
-    setRuntimeSourceUrl(activeSource.url);
-    fallbackUrlsRef.current = getGooglevideoFallbackUrls(activeSource.url, 8);
-    triedFallbackUrlsRef.current = new Set([activeSource.url]);
-  }, [activeSource?.url]);
-
-  useEffect(() => {
-    if (!playerRef.current || !runtimeSourceUrl) return;
+    if (!playerRef.current || !activeSource?.url) return;
 
     const player = playerRef.current;
     const wasPlaying = !player.paused;
     const previousTime = player.currentTime;
 
-    if (player.src !== runtimeSourceUrl) {
-      player.src = runtimeSourceUrl;
+    if (player.src !== activeSource.url) {
+      player.src = activeSource.url;
       player.load();
     }
 
@@ -100,16 +84,7 @@ export const GlobalVideoPlayer = () => {
     if (wasPlaying) {
       void player.play().catch(() => undefined);
     }
-  }, [runtimeSourceUrl]);
-
-  const tryNextMirror = (): boolean => {
-    const nextUrl = fallbackUrlsRef.current.find((candidate) => !triedFallbackUrlsRef.current.has(candidate));
-    if (!nextUrl) return false;
-
-    triedFallbackUrlsRef.current.add(nextUrl);
-    setRuntimeSourceUrl(nextUrl);
-    return true;
-  };
+  }, [activeSource?.url]);
 
   const recoverCurrentVideo = async () => {
     if (!current?.id) return;
@@ -127,7 +102,7 @@ export const GlobalVideoPlayer = () => {
         return;
       }
 
-      const sources = pickPlayableVideoSources(
+      const rawSources = pickPlayableVideoSources(
         stream.video.map((entry) => ({
           url: entry.url,
           quality: entry.quality,
@@ -135,12 +110,18 @@ export const GlobalVideoPlayer = () => {
         }))
       );
 
-      if (sources.length === 0) {
+      if (rawSources.length === 0) {
         setRelatedError("Video stream unavailable for this item.");
         return;
       }
 
-      playVideo({ ...current, type: "video" }, sources, stream.related ?? []);
+      const proxiedSources = rawSources.map((entry) => ({
+        url: buildMediaProxyUrl(current.id, "video", entry.quality),
+        quality: entry.quality,
+        format: entry.format
+      }));
+
+      playVideo({ ...current, type: "video" }, proxiedSources, stream.related ?? []);
       setRelatedError(null);
     } catch {
       setRelatedError("Could not recover this video stream. Try another video.");
@@ -165,7 +146,7 @@ export const GlobalVideoPlayer = () => {
         return;
       }
 
-      const sources = pickPlayableVideoSources(
+      const rawSources = pickPlayableVideoSources(
         stream.video.map((entry) => ({
           url: entry.url,
           quality: entry.quality,
@@ -173,12 +154,18 @@ export const GlobalVideoPlayer = () => {
         }))
       );
 
-      if (sources.length === 0) {
+      if (rawSources.length === 0) {
         setRelatedError("No playable video streams available for this related item.");
         return;
       }
 
-      playVideo({ ...item, type: "video" }, sources, stream.related ?? []);
+      const proxiedSources = rawSources.map((entry) => ({
+        url: buildMediaProxyUrl(item.id, "video", entry.quality),
+        quality: entry.quality,
+        format: entry.format
+      }));
+
+      playVideo({ ...item, type: "video" }, proxiedSources, stream.related ?? []);
     } catch {
       setRelatedError("Could not load related video. Please try another.");
     } finally {
@@ -186,7 +173,7 @@ export const GlobalVideoPlayer = () => {
     }
   };
 
-  if (!isOpen || !runtimeSourceUrl) return null;
+  if (!isOpen || !activeSource) return null;
 
   return (
     <div className="fixed inset-0 z-[60] overflow-y-auto bg-black/95">
@@ -212,10 +199,9 @@ export const GlobalVideoPlayer = () => {
             autoPlay
             playsInline
             className="h-auto w-full"
-            src={runtimeSourceUrl}
+            src={activeSource.url}
             onEnded={() => setPlaying(false)}
             onError={() => {
-              if (tryNextMirror()) return;
               void recoverCurrentVideo();
             }}
           />
@@ -235,7 +221,7 @@ export const GlobalVideoPlayer = () => {
             <select
               id="video-quality"
               className="rounded-md border border-white/25 bg-black px-2 py-1 text-sm"
-              value={activeSource?.quality ?? ""}
+              value={activeSource.quality}
               onChange={(event) => setSelectedQuality(event.target.value)}
             >
               {sourceOptions.map((entry) => (

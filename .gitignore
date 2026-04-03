@@ -15,4 +15,5 @@ client/dist
 server/dist
 
 *.tsbuildinfo
+server/*-player-script.js
 

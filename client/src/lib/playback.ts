@@ -1,4 +1,3 @@
-import { normalizeGooglevideoPrimaryUrl, toProxiedGooglevideoUrl } from "@/lib/googlevideo-fallback";
 import type { StreamResponse } from "@/types/media";
 
 type AudioCandidate = {
@@ -37,16 +36,14 @@ const canPlayMime = (element: HTMLMediaElement, mimeType?: string): boolean => {
   return element.canPlayType(mimeType) !== "";
 };
 
-const normalizeUrl = (url: string): string => toProxiedGooglevideoUrl(normalizeGooglevideoPrimaryUrl(url));
-
 const getAudioCandidates = (stream: StreamResponse): AudioCandidate[] => {
   const directAudio: AudioCandidate[] = stream.audio
     .filter((entry) => Boolean(entry.url))
-    .map((entry) => ({ url: normalizeUrl(entry.url), mimeType: entry.mimeType }));
+    .map((entry) => ({ url: entry.url, mimeType: entry.mimeType }));
 
   const fallbackFromVideo: AudioCandidate[] = stream.video
     .filter((entry) => Boolean(entry.url))
-    .map((entry) => ({ url: normalizeUrl(entry.url), mimeType: entry.format }));
+    .map((entry) => ({ url: entry.url, mimeType: entry.format }));
 
   const deduped = new Map<string, AudioCandidate>();
   [...directAudio, ...fallbackFromVideo].forEach((entry) => {
@@ -74,12 +71,7 @@ export const pickPlayableVideoSources = (
 ): Array<{ url: string; quality: string; format: string }> => {
   if (sources.length === 0) return [];
 
-  const normalizedSources = sources.map((entry) => ({
-    ...entry,
-    url: normalizeUrl(entry.url)
-  }));
-
-  const scored = [...normalizedSources].sort((a, b) => {
+  const scored = [...sources].sort((a, b) => {
     const aScore = (hasAudioCodecHint(a.format) ? 1000 : 0) + parseQuality(a.quality) + (normalizeMime(a.format) === "video/mp4" ? 100 : 0);
     const bScore = (hasAudioCodecHint(b.format) ? 1000 : 0) + parseQuality(b.quality) + (normalizeMime(b.format) === "video/mp4" ? 100 : 0);
     return bScore - aScore;
