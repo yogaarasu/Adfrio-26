@@ -1,11 +1,12 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
-import { getStreamData, normalizeStreams, searchPiped } from "../services/piped.js";
-import { proxyGooglevideoCandidates, proxyGooglevideoStream } from "../services/stream-proxy.js";
+import play from "play-dl";
+import { env } from "../config/env.js";
 import { sendError } from "../utils/http.js";
+import { searchYoutube, getStreamSource, initPlayDl } from "../services/youtube.service.js";
 
 const searchSchema = z.object({
-  q: z.string().min(1),
+  q: z.string().optional(),
   type: z.enum(["music", "video"]).default("music"),
   pageToken: z.string().optional()
 });
@@ -23,45 +24,7 @@ const proxyByIdQuerySchema = z.object({
   quality: z.string().optional()
 });
 
-const extractUpstreamMessage = (error: unknown): string | null => {
-  const candidate = error as {
-    response?: {
-      data?: {
-        error?: string;
-        message?: string;
-      } | string;
-    };
-    message?: string;
-  };
 
-  const data = candidate?.response?.data;
-  if (typeof data === "string") return data.slice(0, 200);
-  if (typeof data?.error === "string") return data.error;
-  if (typeof data?.message === "string") return data.message;
-  if (typeof candidate?.message === "string") return candidate.message;
-  return null;
-};
-
-const extractMediaId = (rawUrl: string): string => {
-  try {
-    const normalized = rawUrl.startsWith("http")
-      ? rawUrl
-      : `https://www.youtube.com${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`;
-
-    const parsed = new URL(normalized);
-    const fromQuery = parsed.searchParams.get("v");
-    if (fromQuery) return fromQuery;
-
-    const parts = parsed.pathname.split("/").filter(Boolean);
-    return parts[parts.length - 1] ?? "";
-  } catch {
-    const queryMatch = rawUrl.match(/[?&]v=([a-zA-Z0-9_-]+)/);
-    if (queryMatch?.[1]) return queryMatch[1];
-
-    const pathMatch = rawUrl.match(/\/([a-zA-Z0-9_-]{6,})$/);
-    return pathMatch?.[1] ?? "";
-  }
-};
 
 export const searchMedia = async (req: Request, res: Response): Promise<Response> => {
   const parsed = searchSchema.safeParse(req.query);
@@ -70,31 +33,15 @@ export const searchMedia = async (req: Request, res: Response): Promise<Response
   }
 
   try {
-    const { items, nextPageToken } = await searchPiped(parsed.data.q, parsed.data.type, parsed.data.pageToken);
-
-    const normalized = items
-      .filter((item) => item.url && item.title)
-      .map((item) => {
-        const mediaId = extractMediaId(item.url ?? "");
-        return {
-          id: mediaId,
-          title: item.title,
-          creator: item.uploaderName ?? "Unknown artist",
-          thumbnail: item.thumbnail ?? "",
-          duration: item.duration ?? null,
-          type: parsed.data.type,
-          youtubeUrl: mediaId ? `https://www.youtube.com/watch?v=${mediaId}` : null
-        };
-      })
-      .filter((item) => Boolean(item.id));
-
-    return res.json({ items: normalized, nextPageToken });
+    const { items, nextPageToken } = await searchYoutube(
+      parsed.data.q,
+      parsed.data.type as "music" | "video",
+      parsed.data.pageToken
+    );
+    return res.json({ items, nextPageToken });
   } catch (error) {
-    const upstream = extractUpstreamMessage(error);
-    const message = upstream
-      ? `Unable to fetch media right now: ${upstream}`
-      : "Unable to fetch media from upstream sources right now";
-    return sendError(res, 502, message);
+    console.error("Search Youtube Error:", error);
+    return sendError(res, 502, "Unable to fetch media from upstream sources right now");
   }
 };
 
@@ -122,27 +69,54 @@ export const getMediaStreams = async (req: Request, res: Response): Promise<Resp
   }
 
   try {
-    const rawStreams = await getStreamData(parsed.data.id);
-    const streams = normalizeStreams(rawStreams);
-
-    if (streams.audio.length === 0 && streams.video.length === 0 && !streams.hls && !streams.dash) {
-      return res.json(unavailablePayload("No playable streams found for this video on current upstream instances"));
+    await initPlayDl();
+    const videoUrl = parsed.data.id.startsWith("http") 
+      ? parsed.data.id 
+      : `https://www.youtube.com/watch?v=${parsed.data.id}`;
+      
+    let info: any;
+    try {
+        info = await play.video_info(videoUrl);
+    } catch (err) {
+        console.warn("play-dl.video_info failed, using basic info...");
+        // Basic fallback info if video_info fails
+        info = {
+            video_details: {
+                title: "Media Item",
+                description: "",
+                thumbnails: [{ url: `https://img.youtube.com/vi/${parsed.data.id}/maxresdefault.jpg` }],
+                channel: { name: "YouTube" }
+            }
+        };
     }
-
-    return res.json({ ...streams, unavailableReason: null });
+    
+    // Using a relative path for the frontend (the client constant will prepend its API_URL)
+    // or we can use the server's PORT to build a full URL if needed.
+    const baseUrl = `http://localhost:${env.PORT}/api`;
+    
+    return res.json({
+      title: info.video_details.title,
+      description: info.video_details.description,
+      thumbnail: info.video_details.thumbnails?.[0]?.url,
+      uploader: info.video_details.channel?.name,
+      audio: [{
+        url: `${baseUrl}/media/proxy/${parsed.data.id}?type=audio`,
+        mimeType: "audio/mpeg",
+        bitrate: 128000
+      }],
+      video: [{
+        url: `${baseUrl}/media/proxy/${parsed.data.id}?type=video`,
+        quality: "720p",
+        format: "video/mp4"
+      }],
+      related: [],
+      hls: null,
+      dash: null,
+      unavailableReason: null
+    });
   } catch (error) {
-    const upstream = extractUpstreamMessage(error);
-    const blocked = upstream?.includes("SignInConfirmNotBotException") || upstream?.includes("temporarily blocked");
-
-    if (blocked) {
-      return res.json(unavailablePayload("This video is temporarily blocked by upstream extraction. Try another video."));
-    }
-
-    const message = upstream
-      ? `Unable to load stream variants right now: ${upstream}`
-      : "Unable to load stream variants right now";
-
-    return res.json(unavailablePayload(message));
+    console.error("Get Media Streams Error:", error);
+    return res.json(unavailablePayload("Unable to load stream variants right now"));
   }
 };
 
@@ -152,18 +126,8 @@ export const proxyMediaStream = async (req: Request, res: Response): Promise<voi
     return sendError(res, 400, "Invalid proxy url");
   }
 
-  try {
-    await proxyGooglevideoStream(req, res, parsed.data.url);
-  } catch (error) {
-    const upstream = extractUpstreamMessage(error);
-    const message = upstream
-      ? `Unable to proxy stream right now: ${upstream}`
-      : "Unable to proxy stream right now";
-
-    if (!res.headersSent) {
-      return sendError(res, 502, message);
-    }
-  }
+  // If it's a direct proxy of a URL, we might still want to use play-dl if it's a youtube url
+  return sendError(res, 501, "Direct URL proxying is deprecated. Use id-based proxy.");
 };
 
 export const proxyMediaById = async (req: Request, res: Response): Promise<void | Response> => {
@@ -175,34 +139,47 @@ export const proxyMediaById = async (req: Request, res: Response): Promise<void 
   }
 
   const { id } = parsedParams.data;
-  const { type, quality } = parsedQuery.data;
+  const { type } = parsedQuery.data;
 
   try {
-    const rawStreams = await getStreamData(id);
-    const streams = normalizeStreams(rawStreams);
+    const streamInfo = await getStreamSource(id, type as "audio" | "video");
 
-    const candidates =
-      type === "audio"
-        ? [...streams.audio.map((entry) => entry.url), ...streams.video.map((entry) => entry.url)].filter(Boolean)
-        : (() => {
-            const exact = quality ? streams.video.filter((entry) => entry.quality === quality).map((entry) => entry.url) : [];
-            const allVideo = streams.video.map((entry) => entry.url);
-            return [...exact, ...allVideo, ...streams.audio.map((entry) => entry.url)].filter(Boolean);
-          })();
-
-    if (candidates.length === 0) {
-      return sendError(res, 404, "No proxy stream candidates available");
+    // Handle Redirect if the server is blocked
+    if ("url" in streamInfo) {
+      console.log(`Redirecting to: ${streamInfo.url.substring(0, 50)}...`);
+      return res.redirect(302, streamInfo.url);
     }
 
-    await proxyGooglevideoCandidates(req, res, candidates);
-  } catch (error) {
-    const upstream = extractUpstreamMessage(error);
-    const message = upstream
-      ? `Unable to proxy stream by media id right now: ${upstream}`
-      : "Unable to proxy stream by media id right now";
+    if (!("stream" in streamInfo) || !streamInfo.stream) {
+      return sendError(res, 502, "Unable to proxy stream by media id right now");
+    }
 
+    const { stream } = streamInfo;
+
+    // Set headers for audio/video
+    res.setHeader("Content-Type", type === "audio" ? "audio/mpeg" : "video/mp4");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("X-Adfrio-Proxy", "play-dl-proxy");
+
+    stream.pipe(res);
+
+    req.on("close", () => {
+      if (stream.destroy) stream.destroy();
+    });
+
+    stream.on("error", (err: any) => {
+      console.error("Stream Proxy Error:", err);
+      if (!res.headersSent) {
+        res.status(502).end();
+      } else {
+        res.end();
+      }
+    });
+
+  } catch (error) {
+    console.error("Proxy Media Error:", error);
     if (!res.headersSent) {
-      return sendError(res, 502, message);
+      return sendError(res, 502, "Unable to proxy stream by media id right now");
     }
   }
 };

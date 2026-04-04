@@ -117,7 +117,20 @@ export const GlobalAudioPlayer = () => {
   );
 
   const onSeekBy = useCallback((seconds: number) => seekBy(seconds, audioRef.current), [seekBy]);
-  useMediaSession({ onSeekBy, onNext: () => void jump(1), onPrev: () => void jump(-1) });
+  const onSeekTo = useCallback((time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+    }
+  }, []);
+  const onTogglePlay = useCallback(() => setPlaying(!playing), [playing, setPlaying]);
+
+  useMediaSession({
+    onSeekBy,
+    onNext: () => void jump(1),
+    onPrev: () => void jump(-1),
+    onTogglePlay,
+    onSeekTo
+  });
 
   const progress = Math.min(100, (currentTime / (duration || 1)) * 100);
 

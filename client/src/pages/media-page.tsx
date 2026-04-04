@@ -11,8 +11,8 @@ import { useMediaSearch } from "@/hooks/use-media-search";
 import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 
 const defaultQueries: Record<MediaType, string> = {
-  music: "top songs",
-  video: "trending videos"
+  music: "",
+  video: ""
 };
 
 type Props = {
