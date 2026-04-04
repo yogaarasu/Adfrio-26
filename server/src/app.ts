@@ -13,7 +13,16 @@ app.use(
   cors({
     origin: [env.CLIENT_URL],
     credentials: true,
-    exposedHeaders: ["content-range", "accept-ranges", "content-length", "content-type", "cache-control", "etag"]
+    allowedHeaders: ["authorization", "content-type", "range"],
+    exposedHeaders: [
+      "content-range",
+      "accept-ranges",
+      "content-length",
+      "content-type",
+      "cache-control",
+      "etag",
+      "x-adfrio-proxy"
+    ]
   })
 );
 app.use(

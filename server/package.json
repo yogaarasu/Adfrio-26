@@ -26,6 +26,9 @@
     "node-youtube-music": "^0.10.3",
     "nodemailer": "^6.10.0",
     "play-dl": "^1.9.7",
+    "youtube-dl-exec": "^3.1.4",
+    "youtube-ext": "^1.1.25",
+    "youtubei.js": "^17.0.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {

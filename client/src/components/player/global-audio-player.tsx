@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { Pause, Play, Rewind, FastForward, Volume2 } from "lucide-react";
+import { Pause, Play, Rewind, FastForward, Volume2, SkipBack, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePlayerStore } from "@/store/player-store";
 import { useMediaSession } from "@/hooks/use-media-session";
@@ -11,6 +11,7 @@ import { buildMediaProxyUrl } from "@/lib/proxy-stream-url";
 export const GlobalAudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recoveredIdRef = useRef<string | null>(null);
+  const playPromiseRef = useRef<Promise<void> | null>(null);
 
   const current = usePlayerStore((state) => state.current);
   const audio = usePlayerStore((state) => state.audio);
@@ -27,34 +28,54 @@ export const GlobalAudioPlayer = () => {
   const seekBy = usePlayerStore((state) => state.seekBy);
   const playAudio = usePlayerStore((state) => state.playAudio);
 
+  // Reset recovery tracker when track changes
   useEffect(() => {
     if (current?.id !== recoveredIdRef.current) {
       recoveredIdRef.current = null;
     }
   }, [current?.id]);
 
+  // Sync volume
   useEffect(() => {
     if (!audioRef.current) return;
     audioRef.current.volume = volume;
   }, [volume]);
 
+  // Sync src + play/pause
   useEffect(() => {
-    if (!audioRef.current) return;
+    const el = audioRef.current;
+    if (!el) return;
 
     if (!audio?.url || video.active) {
-      audioRef.current.pause();
+      // Safely abort any in-flight play() before pausing
+      if (playPromiseRef.current) {
+        playPromiseRef.current.then(() => el.pause()).catch(() => undefined);
+      } else {
+        el.pause();
+      }
       return;
     }
 
-    if (audioRef.current.src !== audio.url) {
-      audioRef.current.src = audio.url;
-      audioRef.current.load();
+    if (el.src !== audio.url) {
+      el.src = audio.url;
+      el.load();
     }
 
     if (playing) {
-      void audioRef.current.play().catch(() => setPlaying(false));
+      // Always capture the play() promise so we can abort it safely
+      playPromiseRef.current = el.play().catch((err: Error) => {
+        // "interrupted by new load" is safe to ignore; real errors should pause
+        if (!err.message.includes("interrupted")) {
+          setPlaying(false);
+        }
+      });
     } else {
-      audioRef.current.pause();
+      if (playPromiseRef.current) {
+        playPromiseRef.current.then(() => el.pause()).catch(() => undefined);
+        playPromiseRef.current = null;
+      } else {
+        el.pause();
+      }
     }
   }, [audio?.url, playing, setPlaying, video.active]);
 
@@ -80,7 +101,11 @@ export const GlobalAudioPlayer = () => {
         return;
       }
 
-      playAudio(current, { url: buildMediaProxyUrl(current.id, "audio"), mimeType: bestAudio.mimeType }, queue);
+      playAudio(
+        current,
+        { url: buildMediaProxyUrl(current.id, "audio"), mimeType: bestAudio.mimeType },
+        queue
+      );
     } catch {
       setPlaying(false);
     }
@@ -97,18 +122,16 @@ export const GlobalAudioPlayer = () => {
 
       try {
         const stream = await mediaApi.streams(next.id);
-        if (stream.unavailableReason) {
-          setPlaying(false);
-          return;
-        }
+        if (stream.unavailableReason) { setPlaying(false); return; }
 
         const bestAudio = pickBestAudioSource(stream);
-        if (!bestAudio?.url) {
-          setPlaying(false);
-          return;
-        }
+        if (!bestAudio?.url) { setPlaying(false); return; }
 
-        playAudio(next, { url: buildMediaProxyUrl(next.id, "audio"), mimeType: bestAudio.mimeType }, queue);
+        playAudio(
+          next,
+          { url: buildMediaProxyUrl(next.id, "audio"), mimeType: bestAudio.mimeType },
+          queue
+        );
       } catch {
         setPlaying(false);
       }
@@ -118,9 +141,7 @@ export const GlobalAudioPlayer = () => {
 
   const onSeekBy = useCallback((seconds: number) => seekBy(seconds, audioRef.current), [seekBy]);
   const onSeekTo = useCallback((time: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-    }
+    if (audioRef.current) audioRef.current.currentTime = time;
   }, []);
   const onTogglePlay = useCallback(() => setPlaying(!playing), [playing, setPlaying]);
 
@@ -134,53 +155,102 @@ export const GlobalAudioPlayer = () => {
 
   const progress = Math.min(100, (currentTime / (duration || 1)) * 100);
 
-  if (!current || !audio) return <audio ref={audioRef} preload="none" />;
+  // Hidden element when no track — keeps audioRef mounted
+  if (!current || !audio) {
+    return <audio ref={audioRef} preload="none" />;
+  }
 
   return (
-    <div className="fixed bottom-16 left-0 right-0 z-50 border-t border-white/20 bg-black/95 px-4 py-3 backdrop-blur md:bottom-0">
+    <div className="fixed bottom-16 left-0 right-0 z-50 border-t border-white/20 bg-black/95 px-4 py-3 backdrop-blur-md md:bottom-0">
+      {/* Hidden audio element */}
       <audio
         ref={audioRef}
-        onTimeUpdate={(event) => setProgress(event.currentTarget.currentTime, event.currentTarget.duration || 0)}
+        preload="auto"
+        onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime, e.currentTarget.duration || 0)}
         onEnded={() => void jump(1)}
-        onError={() => {
-          void recoverCurrentTrack();
-        }}
+        onError={() => void recoverCurrentTrack()}
       />
-      <div className="mx-auto flex max-w-6xl flex-col gap-3">
-        <div className="h-1 w-full rounded-full bg-white/10">
-          <div className="h-full rounded-full bg-white" style={{ width: `${progress}%` }} />
+
+      <div className="mx-auto flex max-w-6xl flex-col gap-2">
+        {/* Progress bar — clickable */}
+        <div
+          className="group h-1.5 w-full cursor-pointer rounded-full bg-white/15"
+          onClick={(e) => {
+            if (!audioRef.current || !duration) return;
+            const rect = (e.target as HTMLDivElement).getBoundingClientRect();
+            const ratio = (e.clientX - rect.left) / rect.width;
+            audioRef.current.currentTime = ratio * duration;
+          }}
+          role="slider"
+          aria-label="Seek"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          tabIndex={0}
+        >
+          <div
+            className="h-full rounded-full bg-white transition-all duration-150 group-hover:bg-indigo-400"
+            style={{ width: `${progress}%` }}
+          />
         </div>
+
+        {/* Controls row */}
         <div className="flex items-center gap-3">
-          <img src={current.thumbnail} alt={current.title} className="h-12 w-12 rounded-lg object-cover" />
+          {/* Thumbnail + title */}
+          <img
+            src={current.thumbnail}
+            alt={current.title}
+            className="h-12 w-12 rounded-lg object-cover shadow-lg"
+          />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold">{current.title}</p>
-            <p className="truncate text-xs text-white/70">{current.creator}</p>
+            <p className="truncate text-xs text-white/60">{current.creator}</p>
           </div>
+
+          {/* Playback controls */}
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={() => onSeekBy(-10)}>
+            <Button variant="ghost" size="icon" onClick={() => void jump(-1)} aria-label="Previous">
+              <SkipBack className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => onSeekBy(-10)} aria-label="Rewind 10s">
               <Rewind className="h-4 w-4" />
             </Button>
-            <Button variant="default" size="icon" onClick={() => setPlaying(!playing)}>
-              {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            <Button
+              variant="default"
+              size="icon"
+              onClick={onTogglePlay}
+              className="h-10 w-10 rounded-full"
+              aria-label={playing ? "Pause" : "Play"}
+            >
+              {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => onSeekBy(10)}>
+            <Button variant="ghost" size="icon" onClick={() => onSeekBy(10)} aria-label="Skip 10s">
               <FastForward className="h-4 w-4" />
             </Button>
+            <Button variant="ghost" size="icon" onClick={() => void jump(1)} aria-label="Next">
+              <SkipForward className="h-4 w-4" />
+            </Button>
           </div>
+
+          {/* Volume */}
           <div className="hidden items-center gap-2 md:flex">
-            <Volume2 className="h-4 w-4 text-white/70" />
+            <Volume2 className="h-4 w-4 text-white/60" />
             <input
               type="range"
               min={0}
               max={1}
-              step={0.01}
+              step={0.02}
               value={volume}
-              onChange={(event) => setVolume(Number(event.target.value))}
+              onChange={(e) => setVolume(Number(e.target.value))}
+              className="w-24 accent-indigo-400"
+              aria-label="Volume"
             />
           </div>
-        </div>
-        <div className="hidden md:block">
-          <SleepTimer />
+
+          {/* Sleep timer */}
+          <div className="hidden md:block">
+            <SleepTimer />
+          </div>
         </div>
       </div>
     </div>
