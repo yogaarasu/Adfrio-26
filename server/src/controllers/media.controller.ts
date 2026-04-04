@@ -1,52 +1,37 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
-import play from "play-dl";
 import { env } from "../config/env.js";
 import { sendError } from "../utils/http.js";
-import { searchYoutube, getStreamSource, initPlayDl } from "../services/youtube.service.js";
+import {
+  searchYoutube,
+  getStreamSource,
+  getVideoInfo,
+  initPlayDl,
+} from "../services/youtube.service.js";
 import { proxyGooglevideoCandidates } from "../services/stream-proxy.js";
+
+// ─── Validation schemas ───────────────────────────────────────────────────────
 
 const searchSchema = z.object({
   q: z.string().optional(),
   type: z.enum(["music", "video"]).default("music"),
-  pageToken: z.string().optional()
-});
-
-const proxySchema = z.object({
-  url: z.string().url()
+  pageToken: z.string().optional(),
 });
 
 const proxyByIdSchema = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
 
 const proxyByIdQuerySchema = z.object({
   type: z.enum(["audio", "video"]).default("audio"),
-  quality: z.string().optional()
+  quality: z.string().optional(),
 });
-
-export const searchMedia = async (req: Request, res: Response): Promise<Response> => {
-  const parsed = searchSchema.safeParse(req.query);
-  if (!parsed.success) {
-    return sendError(res, 400, "Invalid query params");
-  }
-
-  try {
-    const { items, nextPageToken } = await searchYoutube(
-      parsed.data.q,
-      parsed.data.type as "music" | "video",
-      parsed.data.pageToken
-    );
-    return res.json({ items, nextPageToken });
-  } catch (error) {
-    console.error("Search Youtube Error:", error);
-    return sendError(res, 502, "Unable to fetch media from upstream sources right now");
-  }
-};
 
 const streamSchema = z.object({
-  id: z.string().min(1)
+  id: z.string().min(1),
 });
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const unavailablePayload = (reason: string) => ({
   title: "Unavailable",
@@ -58,82 +43,128 @@ const unavailablePayload = (reason: string) => ({
   related: [],
   hls: null,
   dash: null,
-  unavailableReason: reason
+  unavailableReason: reason,
 });
 
 /** Build the server base URL from the incoming request — works in dev and production. */
 const buildBaseUrl = (req: Request): string => {
-  const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol ?? "http";
-  const host = (req.headers["x-forwarded-host"] as string | undefined)
-    ?? req.headers.host
-    ?? `localhost:${env.PORT}`;
+  const proto =
+    (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol ?? "http";
+  const host =
+    (req.headers["x-forwarded-host"] as string | undefined) ??
+    req.headers.host ??
+    `localhost:${env.PORT}`;
   return `${proto}://${host}/api`;
 };
 
+const cleanVideoId = (raw: string): string => {
+  if (!raw.startsWith("http")) return raw;
+  try {
+    const parsed = new URL(raw);
+    return parsed.searchParams.get("v") ?? raw.split("/").pop() ?? raw;
+  } catch {
+    return raw;
+  }
+};
+
+// ─── Handlers ────────────────────────────────────────────────────────────────
+
+/** GET /api/media/search */
+export const searchMedia = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = searchSchema.safeParse(req.query);
+  if (!parsed.success) return sendError(res, 400, "Invalid query params");
+
+  try {
+    const { items, nextPageToken } = await searchYoutube(
+      parsed.data.q,
+      parsed.data.type as "music" | "video",
+      parsed.data.pageToken
+    );
+    return res.json({ items, nextPageToken });
+  } catch (error) {
+    console.error("Search Error:", error);
+    return sendError(res, 502, "Unable to fetch media from upstream sources right now");
+  }
+};
+
+/**
+ * GET /api/media/streams/:id
+ *
+ * Returns stream metadata. Both audio & video point to our proxy endpoint
+ * so the browser always goes through the server (avoids CORS on googlevideo.com).
+ */
 export const getMediaStreams = async (req: Request, res: Response): Promise<Response> => {
   const parsed = streamSchema.safeParse(req.params);
-  if (!parsed.success) {
-    return sendError(res, 400, "Invalid media id");
-  }
+  if (!parsed.success) return sendError(res, 400, "Invalid media id");
+
+  const id = cleanVideoId(parsed.data.id);
 
   try {
     await initPlayDl();
-    const videoUrl = parsed.data.id.startsWith("http")
-      ? parsed.data.id
-      : `https://www.youtube.com/watch?v=${parsed.data.id}`;
-
-    let info: any;
-    try {
-      info = await play.video_info(videoUrl);
-    } catch (err) {
-      console.warn("play-dl.video_info failed, using basic info...");
-      info = {
-        video_details: {
-          title: "Media Item",
-          description: "",
-          thumbnails: [{ url: `https://img.youtube.com/vi/${parsed.data.id}/maxresdefault.jpg` }],
-          channel: { name: "YouTube" }
-        }
-      };
-    }
-
+    const info = await getVideoInfo(id);
     const baseUrl = buildBaseUrl(req);
 
+    // Build proxy URLs. The actual source is resolved server-side on demand.
+    const audioProxyUrl = `${baseUrl}/media/proxy/${encodeURIComponent(id)}?type=audio`;
+    const videoProxyUrl = `${baseUrl}/media/proxy/${encodeURIComponent(id)}?type=video`;
+
+    // Also provide any direct stream URLs from Innertube as fallback hints
+    // so the client can verify availability before loading.
+    const audioEntries = info.audioStreams.length > 0
+      ? info.audioStreams.slice(0, 1).map(() => ({
+          url: audioProxyUrl,
+          mimeType: "audio/mpeg",
+          bitrate: 128000,
+        }))
+      : [{ url: audioProxyUrl, mimeType: "audio/mpeg", bitrate: 128000 }];
+
+    const videoEntries = info.videoStreams.length > 0
+      ? info.videoStreams.slice(0, 3).map((v) => ({
+          url: `${baseUrl}/media/proxy/${encodeURIComponent(id)}?type=video&quality=${encodeURIComponent(v.quality)}`,
+          quality: v.quality,
+          format: v.mimeType,
+        }))
+      : [{ url: videoProxyUrl, quality: "720p", format: "video/mp4" }];
+
+    // Build related as MediaItem array
+    const related = info.related.map((r) => ({
+      id: r.id,
+      title: r.title,
+      creator: r.creator,
+      thumbnail: r.thumbnail,
+      duration: r.duration,
+      type: r.type,
+      youtubeUrl: r.youtubeUrl,
+    }));
+
     return res.json({
-      title: info.video_details.title,
-      description: info.video_details.description,
-      thumbnail: info.video_details.thumbnails?.[0]?.url,
-      uploader: info.video_details.channel?.name,
-      audio: [{
-        url: `${baseUrl}/media/proxy/${parsed.data.id}?type=audio`,
-        mimeType: "audio/mpeg",
-        bitrate: 128000
-      }],
-      video: [{
-        url: `${baseUrl}/media/proxy/${parsed.data.id}?type=video`,
-        quality: "720p",
-        format: "video/mp4"
-      }],
-      related: [],
-      hls: null,
-      dash: null,
-      unavailableReason: null
+      title: info.title,
+      description: info.description,
+      thumbnail: info.thumbnail,
+      uploader: info.uploader,
+      audio: audioEntries,
+      video: videoEntries,
+      related,
+      hls: info.hls,
+      dash: info.dash,
+      unavailableReason: null,
     });
   } catch (error) {
-    console.error("Get Media Streams Error:", error);
+    console.error("getMediaStreams Error:", error);
     return res.json(unavailablePayload("Unable to load stream variants right now"));
   }
 };
 
-export const proxyMediaStream = async (req: Request, res: Response): Promise<void | Response> => {
-  const parsed = proxySchema.safeParse(req.query);
-  if (!parsed.success) {
-    return sendError(res, 400, "Invalid proxy url");
-  }
-  return sendError(res, 501, "Direct URL proxying is deprecated. Use id-based proxy.");
-};
-
-export const proxyMediaById = async (req: Request, res: Response): Promise<void | Response | any> => {
+/**
+ * GET /api/media/proxy/:id?type=audio|video
+ *
+ * Proxies the actual raw stream bytes through the server.
+ * Handles Range requests for seek support.
+ */
+export const proxyMediaById = async (
+  req: Request,
+  res: Response
+): Promise<void | Response | any> => {
   const parsedParams = proxyByIdSchema.safeParse(req.params);
   const parsedQuery = proxyByIdQuerySchema.safeParse(req.query);
 
@@ -147,25 +178,28 @@ export const proxyMediaById = async (req: Request, res: Response): Promise<void 
   try {
     const streamInfo = await getStreamSource(id, type as "audio" | "video");
 
-    // ----------------------------------------------------------------
-    // If play-dl/ytdl are blocked, we get a Piped URL fallback.
-    // We proxy this on the backend explicitly via stream-proxy!
-    // ----------------------------------------------------------------
+    // ── URL proxy (Innertube or Piped direct URL) ───────────────────────────
     if ("url" in streamInfo) {
-      console.log(`[proxy] Fetching upstream via proxy worker: ${streamInfo.url.substring(0, 80)}...`);
-      return proxyGooglevideoCandidates(req, res, [streamInfo.url]);
+      const targetUrl = streamInfo.url;
+      try {
+        console.log(`[proxy] Piping via stream-proxy -> ${targetUrl.substring(0, 50)}...`);
+        return await proxyGooglevideoCandidates(req, res, [targetUrl]);
+      } catch (proxyErr: any) {
+        console.warn("[proxy] stream-proxy failed, falling back to 302:", proxyErr?.message);
+        if (!res.headersSent) {
+          return res.redirect(302, targetUrl);
+        }
+        return;
+      }
     }
 
+    // ── Node.js stream (ytdl-core or play-dl) ────────────────────────────────
     if (!("stream" in streamInfo) || !streamInfo.stream) {
       return sendError(res, 502, "No stream object returned from source");
     }
 
     const rawStream = streamInfo.stream;
-
-    // play-dl returns { stream: Readable, content_length, type }
-    // @distube/ytdl-core returns a Readable directly
-    const readable: NodeJS.ReadableStream =
-      (rawStream as any).stream ?? rawStream;
+    const readable: NodeJS.ReadableStream = (rawStream as any).stream ?? rawStream;
 
     const contentLength: number | undefined =
       typeof (rawStream as any).content_length === "number"
@@ -174,11 +208,8 @@ export const proxyMediaById = async (req: Request, res: Response): Promise<void 
         ? (rawStream as any).contentLength
         : undefined;
 
-    // ----------------------------------------------------------------
-    // Range-request handling — required for audio/video seeking
-    // ----------------------------------------------------------------
-    const rangeHeader = req.headers.range;
     const mimeType = type === "audio" ? "audio/mpeg" : "video/mp4";
+    const rangeHeader = req.headers.range;
 
     if (contentLength && rangeHeader) {
       const parts = rangeHeader.replace(/bytes=/, "").split("-");
@@ -192,42 +223,39 @@ export const proxyMediaById = async (req: Request, res: Response): Promise<void 
         "Content-Length": chunkSize,
         "Content-Type": mimeType,
         "Cache-Control": "public, max-age=3600",
-        "X-Adfrio-Proxy": "play-dl-stream"
+        "X-Adfrio-Proxy": "node-stream",
       });
     } else {
       const headers: Record<string, string | number> = {
         "Accept-Ranges": "bytes",
         "Content-Type": mimeType,
         "Cache-Control": "public, max-age=3600",
-        "X-Adfrio-Proxy": "play-dl-stream"
+        "X-Adfrio-Proxy": "node-stream",
       };
-      if (contentLength) {
-        headers["Content-Length"] = contentLength;
-      }
+      if (contentLength) headers["Content-Length"] = contentLength;
       res.writeHead(200, headers);
     }
 
-    // ----------------------------------------------------------------
-    // Pipe — destroy upstream on client disconnect
-    // ----------------------------------------------------------------
     req.on("close", () => {
       try { (readable as any).destroy?.(); } catch { /* ignore */ }
     });
 
     readable.on("error", (err: any) => {
       console.error("[proxy] stream error:", err?.message ?? err);
-      if (!res.headersSent) {
-        res.statusCode = 502;
-      }
+      if (!res.headersSent) res.statusCode = 502;
       res.end();
     });
 
     readable.pipe(res);
-
   } catch (error: any) {
     console.error("[proxy] fatal error:", error?.message ?? error);
     if (!res.headersSent) {
       return sendError(res, 502, "Unable to proxy stream — please try again");
     }
   }
+};
+
+// Keep deprecated URL-based proxy returning 501
+export const proxyMediaStream = async (req: Request, res: Response): Promise<Response> => {
+  return sendError(res, 501, "Direct URL proxying is deprecated. Use id-based proxy.");
 };

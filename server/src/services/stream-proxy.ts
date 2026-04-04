@@ -75,7 +75,8 @@ const getHostVariants = (rawUrl: string): string[] => {
 
 const pickProxyHeaders = (req: Request) => {
   const headers: Record<string, string> = {
-    "user-agent": req.headers["user-agent"] ?? "Mozilla/5.0",
+    // Force a stable modern browser User-Agent so YouTube does not block Innertube streaming URLs
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     accept: req.headers.accept ?? "*/*",
     "accept-encoding": "identity"
   };

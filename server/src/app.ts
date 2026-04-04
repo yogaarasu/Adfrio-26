@@ -9,9 +9,28 @@ import { apiRouter } from "./routes/index.js";
 
 export const app = express();
 
+// Collect all allowed CORS origins
+const allowedOrigins = new Set<string>(
+  [
+    env.CLIENT_URL,
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:4173",
+  ].filter(Boolean)
+);
+
 app.use(
   cors({
-    origin: [env.CLIENT_URL],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, mobile apps, Render health-checks)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.has(origin)) return callback(null, true);
+      // Allow any Render preview subdomain (*.onrender.com)
+      if (/\.onrender\.com$/.test(origin)) return callback(null, true);
+      // Allow any Vercel preview subdomain (*.vercel.app)
+      if (/\.vercel\.app$/.test(origin)) return callback(null, true);
+      callback(null, true); // Permissive — tighten in production if needed
+    },
     credentials: true,
     allowedHeaders: ["authorization", "content-type", "range"],
     exposedHeaders: [
@@ -21,8 +40,8 @@ app.use(
       "content-type",
       "cache-control",
       "etag",
-      "x-adfrio-proxy"
-    ]
+      "x-adfrio-proxy",
+    ],
   })
 );
 app.use(

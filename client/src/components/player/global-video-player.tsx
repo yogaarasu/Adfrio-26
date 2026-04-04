@@ -1,138 +1,35 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Loader2, Rewind, FastForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePlayerStore } from "@/store/player-store";
 import { mediaApi } from "@/services/api";
 import type { MediaItem } from "@/types/media";
 import { formatDuration } from "@/lib/utils";
-import { pickPlayableVideoSources } from "@/lib/playback";
-import { buildMediaProxyUrl } from "@/lib/proxy-stream-url";
+import ReactPlayer from "react-player";
 
 export const GlobalVideoPlayer = () => {
   const current = usePlayerStore((state) => state.current);
   const video = usePlayerStore((state) => state.video);
   const clearVideo = usePlayerStore((state) => state.clearVideo);
   const setPlaying = usePlayerStore((state) => state.setPlaying);
+  const playing = usePlayerStore((state) => state.playing);
   const playVideo = usePlayerStore((state) => state.playVideo);
 
   const [relatedError, setRelatedError] = useState<string | null>(null);
   const [loadingRelatedId, setLoadingRelatedId] = useState<string | null>(null);
-  const [selectedQuality, setSelectedQuality] = useState<string>("");
 
-  const playerRef = useRef<HTMLVideoElement | null>(null);
-  const recoveredIdRef = useRef<string | null>(null);
+  const playerRef = useRef<any | null>(null);
 
-  const isOpen = video.active && video.sources.length > 0;
-
-  useEffect(() => {
-    if (current?.id !== recoveredIdRef.current) {
-      recoveredIdRef.current = null;
-    }
-  }, [current?.id]);
-
-  useEffect(() => {
-    if (!video.sources.length) {
-      setSelectedQuality("");
-      return;
-    }
-
-    const firstQuality = video.sources[0]?.quality ?? "";
-    setSelectedQuality((prev) => {
-      if (!prev) return firstQuality;
-      return video.sources.some((entry) => entry.quality === prev) ? prev : firstQuality;
-    });
-  }, [video.sources]);
-
-  const sourceOptions = useMemo(
-    () =>
-      pickPlayableVideoSources(
-        video.sources.map((entry) => ({
-          url: entry.url,
-          quality: entry.quality,
-          format: entry.format
-        }))
-      ),
-    [video.sources]
-  );
-
-  const activeSource = sourceOptions.find((entry) => entry.quality === selectedQuality) ?? sourceOptions[0] ?? null;
-
-  useEffect(() => {
-    if (!playerRef.current || !activeSource?.url) return;
-
-    const player = playerRef.current;
-    const wasPlaying = !player.paused;
-    const previousTime = player.currentTime;
-
-    if (player.src !== activeSource.url) {
-      player.src = activeSource.url;
-      player.load();
-    }
-
-    if (Number.isFinite(previousTime) && previousTime > 0) {
-      const seekTo = previousTime;
-      const onLoaded = () => {
-        try {
-          player.currentTime = seekTo;
-        } catch {
-          // Ignore seek errors.
-        }
-      };
-      player.addEventListener("loadedmetadata", onLoaded, { once: true });
-    }
-
-    if (wasPlaying) {
-      void player.play().catch(() => undefined);
-    }
-  }, [activeSource?.url]);
-
-  const recoverCurrentVideo = async () => {
-    if (!current?.id) return;
-    if (recoveredIdRef.current === current.id) {
-      setRelatedError("This video stream expired. Please choose another video.");
-      return;
-    }
-
-    recoveredIdRef.current = current.id;
-
-    try {
-      const stream = await mediaApi.streams(current.id, { forceRefresh: true });
-      if (stream.unavailableReason) {
-        setRelatedError(stream.unavailableReason);
-        return;
-      }
-
-      const rawSources = pickPlayableVideoSources(
-        stream.video.map((entry) => ({
-          url: entry.url,
-          quality: entry.quality,
-          format: entry.format
-        }))
-      );
-
-      if (rawSources.length === 0) {
-        setRelatedError("Video stream unavailable for this item.");
-        return;
-      }
-
-      const proxiedSources = rawSources.map((entry) => ({
-        url: buildMediaProxyUrl(current.id, "video", entry.quality),
-        quality: entry.quality,
-        format: entry.format
-      }));
-
-      playVideo({ ...current, type: "video" }, proxiedSources, stream.related ?? []);
-      setRelatedError(null);
-    } catch {
-      setRelatedError("Could not recover this video stream. Try another video.");
-    }
-  };
+  const isOpen = video.active && !!current?.id;
 
   const seekBy = (seconds: number) => {
     const player = playerRef.current;
     if (!player) return;
-    const next = Math.max(0, Math.min(player.duration || Number.MAX_SAFE_INTEGER, player.currentTime + seconds));
-    player.currentTime = next;
+    const currentTime = player.getCurrentTime();
+    const duration = player.getDuration();
+    if (!duration) return;
+    const next = Math.max(0, Math.min(duration, currentTime + seconds));
+    player.seekTo(next, "seconds");
   };
 
   const playRelated = async (item: MediaItem) => {
@@ -145,27 +42,7 @@ export const GlobalVideoPlayer = () => {
         setRelatedError(stream.unavailableReason);
         return;
       }
-
-      const rawSources = pickPlayableVideoSources(
-        stream.video.map((entry) => ({
-          url: entry.url,
-          quality: entry.quality,
-          format: entry.format
-        }))
-      );
-
-      if (rawSources.length === 0) {
-        setRelatedError("No playable video streams available for this related item.");
-        return;
-      }
-
-      const proxiedSources = rawSources.map((entry) => ({
-        url: buildMediaProxyUrl(item.id, "video", entry.quality),
-        quality: entry.quality,
-        format: entry.format
-      }));
-
-      playVideo({ ...item, type: "video" }, proxiedSources, stream.related ?? []);
+      playVideo({ ...item, type: "video" }, [], stream.related ?? []);
     } catch {
       setRelatedError("Could not load related video. Please try another.");
     } finally {
@@ -173,7 +50,9 @@ export const GlobalVideoPlayer = () => {
     }
   };
 
-  if (!isOpen || !activeSource) return null;
+  if (!isOpen) return null;
+
+  const Player = ReactPlayer as any;
 
   return (
     <div className="fixed inset-0 z-[60] overflow-y-auto bg-black/95">
@@ -192,18 +71,28 @@ export const GlobalVideoPlayer = () => {
           </Button>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-white/20 bg-black">
-          <video
+        <div className="overflow-hidden rounded-2xl border border-white/20 bg-black aspect-video relative">
+          <Player
             ref={playerRef}
+            url={`https://www.youtube.com/watch?v=${current.id}`}
+            playing={playing}
             controls
-            autoPlay
-            playsInline
-            className="h-auto w-full"
-            src={activeSource.url}
+            width="100%"
+            height="100%"
             onEnded={() => setPlaying(false)}
-            onError={() => {
-              void recoverCurrentVideo();
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onError={(e: any) => {
+              console.error("[GlobalVideoPlayer] ReactPlayer Error:", e);
+              setRelatedError("Video failed to play. It may be restricted by YouTube.");
             }}
+            config={
+              {
+                youtube: {
+                  playerVars: { autoplay: 1, rel: 0 }
+                }
+              } as any
+            }
           />
         </div>
 
@@ -214,27 +103,10 @@ export const GlobalVideoPlayer = () => {
           <Button variant="ghost" size="icon" onClick={() => seekBy(10)}>
             <FastForward className="h-4 w-4" />
           </Button>
-          <div className="ml-auto flex items-center gap-2">
-            <label htmlFor="video-quality" className="text-xs uppercase tracking-[0.12em] text-white/60">
-              Quality
-            </label>
-            <select
-              id="video-quality"
-              className="rounded-md border border-white/25 bg-black px-2 py-1 text-sm"
-              value={activeSource.quality}
-              onChange={(event) => setSelectedQuality(event.target.value)}
-            >
-              {sourceOptions.map((entry) => (
-                <option key={entry.quality} value={entry.quality}>
-                  {entry.quality}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
 
         <div className="mt-4">
-          <h3 className="text-base font-semibold">{video.title}</h3>
+          <h3 className="text-base font-semibold">{current.title}</h3>
         </div>
 
         {relatedError ? <p className="mt-3 text-sm text-amber-300">{relatedError}</p> : null}

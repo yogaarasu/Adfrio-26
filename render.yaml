@@ -1,4 +1,4 @@
-﻿services:
+services:
   - type: web
     name: adfrio-api
     env: node
@@ -36,6 +36,7 @@
         sync: false
       - key: SMTP_FROM
         sync: false
+      - key: YOUTUBE_COOKIE
+        sync: false
       - key: PIPED_INSTANCES
-        value: https://api.piped.private.coffee,https://pipedapi.kavin.rocks
-
+        value: https://api.piped.private.coffee,https://pipedapi.kavin.rocks,https://piped.video/api,https://piped-api.garudalinux.org

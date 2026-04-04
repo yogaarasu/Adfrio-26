@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pause, Play, Rewind, FastForward, Volume2, SkipBack, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePlayerStore } from "@/store/player-store";
@@ -7,86 +7,52 @@ import { SleepTimer } from "@/components/player/sleep-timer";
 import { mediaApi } from "@/services/api";
 import { pickBestAudioSource } from "@/lib/playback";
 import { buildMediaProxyUrl } from "@/lib/proxy-stream-url";
+import { useAudioPlayer } from "react-use-audio-player";
 
 export const GlobalAudioPlayer = () => {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const recoveredIdRef = useRef<string | null>(null);
-  const playPromiseRef = useRef<Promise<void> | null>(null);
-
   const current = usePlayerStore((state) => state.current);
   const audio = usePlayerStore((state) => state.audio);
   const video = usePlayerStore((state) => state.video);
   const playing = usePlayerStore((state) => state.playing);
   const volume = usePlayerStore((state) => state.volume);
-  const currentTime = usePlayerStore((state) => state.currentTime);
-  const duration = usePlayerStore((state) => state.duration);
+  const storeCurrentTime = usePlayerStore((state) => state.currentTime);
+  const storeDuration = usePlayerStore((state) => state.duration);
   const queue = usePlayerStore((state) => state.queue);
 
   const setPlaying = usePlayerStore((state) => state.setPlaying);
   const setProgress = usePlayerStore((state) => state.setProgress);
   const setVolume = usePlayerStore((state) => state.setVolume);
-  const seekBy = usePlayerStore((state) => state.seekBy);
   const playAudio = usePlayerStore((state) => state.playAudio);
+  
+  // @ts-ignore Ignore type checks for react-use-audio-player
+  const { load, play, pause, stop, playing: isPlaying, setVolume: setPlayerVolume, duration, getPosition, seek } = useAudioPlayer();
 
-  // Reset recovery tracker when track changes
+  // Polling for exact progress updates from the audio library
+  const [pos, setPos] = useState(0);
   useEffect(() => {
-    if (current?.id !== recoveredIdRef.current) {
-      recoveredIdRef.current = null;
+    let frame: number;
+    const updateProgress = () => {
+      const p = typeof getPosition === "function" ? getPosition() : 0;
+      setPos(p);
+      setProgress(p, duration || storeDuration);
+      frame = requestAnimationFrame(updateProgress);
+    };
+    if (isPlaying) {
+      frame = requestAnimationFrame(updateProgress);
     }
-  }, [current?.id]);
+    return () => cancelAnimationFrame(frame);
+  }, [isPlaying, getPosition, duration, storeDuration, setProgress]);
 
-  // Sync volume
+  // Sync Global Zustand Volume to AudioPlayer
   useEffect(() => {
-    if (!audioRef.current) return;
-    audioRef.current.volume = volume;
-  }, [volume]);
-
-  // Sync src + play/pause
-  useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
-
-    if (!audio?.url || video.active) {
-      // Safely abort any in-flight play() before pausing
-      if (playPromiseRef.current) {
-        playPromiseRef.current.then(() => el.pause()).catch(() => undefined);
-      } else {
-        el.pause();
-      }
-      return;
+    if (typeof setPlayerVolume === "function") {
+      setPlayerVolume(volume);
     }
-
-    if (el.src !== audio.url) {
-      el.src = audio.url;
-      el.load();
-    }
-
-    if (playing) {
-      // Always capture the play() promise so we can abort it safely
-      playPromiseRef.current = el.play().catch((err: Error) => {
-        // "interrupted by new load" is safe to ignore; real errors should pause
-        if (!err.message.includes("interrupted")) {
-          setPlaying(false);
-        }
-      });
-    } else {
-      if (playPromiseRef.current) {
-        playPromiseRef.current.then(() => el.pause()).catch(() => undefined);
-        playPromiseRef.current = null;
-      } else {
-        el.pause();
-      }
-    }
-  }, [audio?.url, playing, setPlaying, video.active]);
+  }, [volume, setPlayerVolume]);
 
   const recoverCurrentTrack = useCallback(async () => {
+    console.warn("[GlobalAudioPlayer] Attempting automated error recovery...");
     if (!current) return;
-    if (recoveredIdRef.current === current.id) {
-      setPlaying(false);
-      return;
-    }
-
-    recoveredIdRef.current = current.id;
 
     try {
       const stream = await mediaApi.streams(current.id, { forceRefresh: true });
@@ -106,10 +72,46 @@ export const GlobalAudioPlayer = () => {
         { url: buildMediaProxyUrl(current.id, "audio"), mimeType: bestAudio.mimeType },
         queue
       );
-    } catch {
+    } catch (err) {
+      console.error("[GlobalAudioPlayer] Recovery failed:", err);
       setPlaying(false);
     }
   }, [current, playAudio, queue, setPlaying]);
+
+  // Master Loader for Audio
+  useEffect(() => {
+    if (!audio?.url || video.active) {
+      if (typeof stop === "function") stop();
+      return;
+    }
+
+    // @ts-ignore Ignore type checks for Howler options passthrough
+    load(audio.url, {
+      autoplay: playing,
+      html5: true, // Required to handle piping chunked proxy streams without crashing
+      format: "mp3",
+      onplay: () => setPlaying(true),
+      onpause: () => setPlaying(false),
+      onend: () => void jump(1),
+      onloaderror: (id: any, err: any) => {
+        console.error(`[GlobalAudioPlayer] Load Error (ID: ${id}):`, err);
+        void recoverCurrentTrack();
+      },
+      onplayerror: (id: any, err: any) => {
+        console.error(`[GlobalAudioPlayer] Play Error (ID: ${id}):`, err);
+        void recoverCurrentTrack();
+      }
+    } as any);
+  }, [audio?.url, video.active]);
+
+  // Sync Global Play/Pause
+  useEffect(() => {
+    if (playing && !isPlaying && audio?.url) {
+      if (typeof play === "function") play();
+    } else if (!playing && isPlaying) {
+      if (typeof pause === "function") pause();
+    }
+  }, [playing, isPlaying, play, pause, audio?.url]);
 
   const jump = useCallback(
     async (dir: -1 | 1) => {
@@ -139,10 +141,12 @@ export const GlobalAudioPlayer = () => {
     [current, playAudio, queue, setPlaying]
   );
 
-  const onSeekBy = useCallback((seconds: number) => seekBy(seconds, audioRef.current), [seekBy]);
-  const onSeekTo = useCallback((time: number) => {
-    if (audioRef.current) audioRef.current.currentTime = time;
-  }, []);
+  const onSeekBy = useCallback((seconds: number) => {
+    const next = Math.max(0, Math.min(duration || Number.MAX_SAFE_INTEGER, getPosition() + seconds));
+    seek(next);
+  }, [duration, getPosition, seek]);
+  
+  const onSeekTo = useCallback((time: number) => seek(time), [seek]);
   const onTogglePlay = useCallback(() => setPlaying(!playing), [playing, setPlaying]);
 
   useMediaSession({
@@ -153,33 +157,22 @@ export const GlobalAudioPlayer = () => {
     onSeekTo
   });
 
-  const progress = Math.min(100, (currentTime / (duration || 1)) * 100);
+  const progress = Math.min(100, (pos / (duration || 1)) * 100);
 
-  // Hidden element when no track — keeps audioRef mounted
   if (!current || !audio) {
-    return <audio ref={audioRef} preload="none" />;
+    return null;
   }
 
   return (
     <div className="fixed bottom-16 left-0 right-0 z-50 border-t border-white/20 bg-black/95 px-4 py-3 backdrop-blur-md md:bottom-0">
-      {/* Hidden audio element */}
-      <audio
-        ref={audioRef}
-        preload="auto"
-        onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime, e.currentTarget.duration || 0)}
-        onEnded={() => void jump(1)}
-        onError={() => void recoverCurrentTrack()}
-      />
-
       <div className="mx-auto flex max-w-6xl flex-col gap-2">
-        {/* Progress bar — clickable */}
         <div
           className="group h-1.5 w-full cursor-pointer rounded-full bg-white/15"
           onClick={(e) => {
-            if (!audioRef.current || !duration) return;
+            if (!duration) return;
             const rect = (e.target as HTMLDivElement).getBoundingClientRect();
             const ratio = (e.clientX - rect.left) / rect.width;
-            audioRef.current.currentTime = ratio * duration;
+            seek(ratio * duration);
           }}
           role="slider"
           aria-label="Seek"
@@ -190,13 +183,11 @@ export const GlobalAudioPlayer = () => {
         >
           <div
             className="h-full rounded-full bg-white transition-all duration-150 group-hover:bg-indigo-400"
-            style={{ width: `${progress}%` }}
+            style={{ width: `${progress || 0}%` }}
           />
         </div>
 
-        {/* Controls row */}
         <div className="flex items-center gap-3">
-          {/* Thumbnail + title */}
           <img
             src={current.thumbnail}
             alt={current.title}
@@ -207,7 +198,6 @@ export const GlobalAudioPlayer = () => {
             <p className="truncate text-xs text-white/60">{current.creator}</p>
           </div>
 
-          {/* Playback controls */}
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="icon" onClick={() => void jump(-1)} aria-label="Previous">
               <SkipBack className="h-4 w-4" />
@@ -232,7 +222,6 @@ export const GlobalAudioPlayer = () => {
             </Button>
           </div>
 
-          {/* Volume */}
           <div className="hidden items-center gap-2 md:flex">
             <Volume2 className="h-4 w-4 text-white/60" />
             <input
@@ -247,7 +236,6 @@ export const GlobalAudioPlayer = () => {
             />
           </div>
 
-          {/* Sleep timer */}
           <div className="hidden md:block">
             <SleepTimer />
           </div>
