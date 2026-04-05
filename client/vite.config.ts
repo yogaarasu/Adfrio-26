@@ -3,35 +3,59 @@ import react from "@vitejs/plugin-react-swc";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "node:path";
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(() => ({
   plugins: [
     react(),
     VitePWA({
-      // In development: disable SW registration to prevent the
-      // "message channel closed" error from stale service workers.
-      disable: mode === "development",
+      disable: false,
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg", "logo.svg"],
+      devOptions: {
+        enabled: true,
+        type: "module"
+      },
+      includeAssets: [
+        "icons/adfrio-192.png",
+        "icons/adfrio-512.png",
+        "icons/adfrio-maskable-192.png",
+        "icons/adfrio-maskable-512.png"
+      ],
       manifest: {
-        name: "Adfrio Media",
+        name: "Adfrio",
         short_name: "Adfrio",
-        description: "Ad-free dual media platform for music and video streaming.",
+        description: "Adfrio music and video streaming app.",
         theme_color: "#000000",
         background_color: "#000000",
         display: "standalone",
         start_url: "/",
         icons: [
           {
-            src: "/logo.svg",
-            sizes: "any",
-            type: "image/svg+xml",
-            purpose: "any maskable"
+            src: "/icons/adfrio-192.png",
+            sizes: "192x192",
+            type: "image/png"
+          },
+          {
+            src: "/icons/adfrio-512.png",
+            sizes: "512x512",
+            type: "image/png"
+          },
+          {
+            src: "/icons/adfrio-maskable-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "maskable"
+          },
+          {
+            src: "/icons/adfrio-maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable"
           }
         ]
       },
       workbox: {
         // Pre-cache all static assets
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+        globIgnores: ["**/adfrio-logo.png"],
         // Bump cache version on every build
         additionalManifestEntries: [],
         cleanupOutdatedCaches: true,
@@ -70,6 +94,9 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: 5173,
+    headers: {
+      "Permissions-Policy": "compute-pressure=*"
+    },
     // Proxy API in dev so CORS is never an issue during local development
     proxy: {
       "/api": {

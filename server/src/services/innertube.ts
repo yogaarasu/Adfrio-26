@@ -95,6 +95,8 @@ export type InnertubeStreamResult = {
   description: string;
   thumbnail: string;
   uploader: string;
+  uploaderAvatarUrl: string | null;
+  likes: number | null;
   audioStreams: Array<{ url: string; mimeType: string; bitrate: number }>;
   videoStreams: Array<{ url: string; quality: string; mimeType: string }>;
   related: Array<{ id: string; title: string; creator: string; thumbnail: string; duration: number | null }>;
@@ -124,6 +126,16 @@ export const innertubeGetStreams = async (
     details.channel?.name ??
     (typeof details.author === "string" ? details.author : details.author?.name) ??
     "Unknown Creator";
+  const uploaderAvatarUrl: string | null =
+    details.channel?.thumbnails?.[0]?.url ??
+    details.author?.thumbnails?.[0]?.url ??
+    null;
+  const likesRaw = details.like_count ?? details.likes ?? null;
+  const likes = typeof likesRaw === "number"
+    ? likesRaw
+    : typeof likesRaw === "string"
+    ? Number(likesRaw.replace(/[^0-9]/g, "")) || null
+    : null;
 
   const adaptiveFormats: any[] = info.streaming_data?.adaptive_formats ?? [];
   const streamingFormats: any[] = info.streaming_data?.formats ?? [];
@@ -211,12 +223,16 @@ export const innertubeGetStreams = async (
   };
 
   const related: RelatedItem[] = [];
+  const relatedIdsSeen = new Set<string>();
 
   for (const item of relatedFeed) {
-    if (related.length >= 12) break;
+    if (related.length >= 36) break;
 
     const id: string = item?.id ?? item?.video_id ?? "";
     if (!id) continue;
+    if (id === videoId) continue;
+    if (relatedIdsSeen.has(id)) continue;
+    relatedIdsSeen.add(id);
 
     const titleObj: any = item?.title;
     const title: string =
@@ -252,6 +268,8 @@ export const innertubeGetStreams = async (
     description,
     thumbnail,
     uploader,
+    uploaderAvatarUrl,
+    likes,
     audioStreams: dedupedAudio,
     videoStreams: [...seenQuality.values()],
     relatedIds,

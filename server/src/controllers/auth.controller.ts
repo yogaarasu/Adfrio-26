@@ -44,6 +44,32 @@ const sanitizeUser = (user: { _id: unknown; email: string; name: string; avatar?
   avatar: user.avatar ?? null
 });
 
+const buildApiBaseUrl = (req: Request): string => {
+  const proto =
+    (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol ?? "http";
+  const host =
+    (req.headers["x-forwarded-host"] as string | undefined) ??
+    req.headers.host ??
+    `localhost:${env.PORT}`;
+  return `${proto}://${host}/api`;
+};
+
+const buildClientRedirect = (params?: Record<string, string>): string => {
+  const url = new URL("/profile", env.CLIENT_URL);
+  Object.entries(params ?? {}).forEach(([key, value]) => {
+    if (!value) return;
+    url.searchParams.set(key, value);
+  });
+  return url.toString();
+};
+
+const resolveGoogleRedirectUri = (req: Request): string => {
+  if (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI.startsWith("http")) {
+    return env.GOOGLE_REDIRECT_URI;
+  }
+  return `${buildApiBaseUrl(req)}/auth/google/callback`;
+};
+
 const upsertGoogleUser = async (identity: GoogleIdentity) => {
   const email = identity.email.toLowerCase();
   let user = await UserModel.findOne({ email });
@@ -139,25 +165,29 @@ export const googleAuth = async (req: Request, res: Response): Promise<Response>
     return sendError(res, 400, "Invalid request payload");
   }
 
-  const ticket = await googleVerifierClient.verifyIdToken({
-    idToken: parsed.data.credential,
-    audience: env.GOOGLE_CLIENT_ID
-  });
+  try {
+    const ticket = await googleVerifierClient.verifyIdToken({
+      idToken: parsed.data.credential,
+      audience: env.GOOGLE_CLIENT_ID
+    });
 
-  const payload = ticket.getPayload();
-  if (!payload?.email) {
-    return sendError(res, 400, "Invalid Google token");
+    const payload = ticket.getPayload();
+    if (!payload?.email) {
+      return sendError(res, 400, "Invalid Google token");
+    }
+
+    const user = await upsertGoogleUser({
+      email: payload.email,
+      name: payload.name,
+      picture: payload.picture,
+      sub: payload.sub
+    });
+
+    const token = signJwt({ userId: String(user._id), email: user.email, name: user.name });
+    return res.json({ token, user: sanitizeUser(user) });
+  } catch {
+    return sendError(res, 400, "Google sign-in verification failed");
   }
-
-  const user = await upsertGoogleUser({
-    email: payload.email,
-    name: payload.name,
-    picture: payload.picture,
-    sub: payload.sub
-  });
-
-  const token = signJwt({ userId: String(user._id), email: user.email, name: user.name });
-  return res.json({ token, user: sanitizeUser(user) });
 };
 
 export const googleAuthCode = async (req: Request, res: Response): Promise<Response> => {
@@ -194,41 +224,49 @@ export const googleAuthCode = async (req: Request, res: Response): Promise<Respo
   let identity: GoogleIdentity | null = null;
 
   if (tokens.id_token) {
-    const idTicket = await googleVerifierClient.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: env.GOOGLE_CLIENT_ID
-    });
+    try {
+      const idTicket = await googleVerifierClient.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: env.GOOGLE_CLIENT_ID
+      });
 
-    const payload = idTicket.getPayload();
-    if (payload?.email) {
-      identity = {
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
-        sub: payload.sub
-      };
+      const payload = idTicket.getPayload();
+      if (payload?.email) {
+        identity = {
+          email: payload.email,
+          name: payload.name,
+          picture: payload.picture,
+          sub: payload.sub
+        };
+      }
+    } catch {
+      identity = null;
     }
   }
 
   if (!identity && tokens.access_token) {
-    const { data } = await axios.get<{
-      email?: string;
-      name?: string;
-      picture?: string;
-      sub?: string;
-    }>("https://openidconnect.googleapis.com/v1/userinfo", {
-      headers: {
-        Authorization: `Bearer ${tokens.access_token}`
-      }
-    });
+    try {
+      const { data } = await axios.get<{
+        email?: string;
+        name?: string;
+        picture?: string;
+        sub?: string;
+      }>("https://openidconnect.googleapis.com/v1/userinfo", {
+        headers: {
+          Authorization: `Bearer ${tokens.access_token}`
+        }
+      });
 
-    if (data.email) {
-      identity = {
-        email: data.email,
-        name: data.name,
-        picture: data.picture,
-        sub: data.sub
-      };
+      if (data.email) {
+        identity = {
+          email: data.email,
+          name: data.name,
+          picture: data.picture,
+          sub: data.sub
+        };
+      }
+    } catch {
+      identity = null;
     }
   }
 
@@ -240,6 +278,136 @@ export const googleAuthCode = async (req: Request, res: Response): Promise<Respo
   const token = signJwt({ userId: String(user._id), email: user.email, name: user.name });
 
   return res.json({ token, user: sanitizeUser(user) });
+};
+
+export const googleAuthStart = async (req: Request, res: Response): Promise<Response | void> => {
+  if (!env.GOOGLE_CLIENT_SECRET) {
+    return sendError(res, 500, "GOOGLE_CLIENT_SECRET is not configured");
+  }
+
+  const redirectUri = resolveGoogleRedirectUri(req);
+  const oauthClient = new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, redirectUri);
+
+  const returnToRaw = typeof req.query.returnTo === "string" ? req.query.returnTo : "/profile";
+  const returnTo = returnToRaw.startsWith("/") ? returnToRaw : "/profile";
+  const state = Buffer.from(JSON.stringify({ returnTo }), "utf-8").toString("base64url");
+
+  const authUrl = oauthClient.generateAuthUrl({
+    access_type: "online",
+    include_granted_scopes: true,
+    prompt: "select_account",
+    scope: ["openid", "email", "profile"],
+    state
+  });
+
+  res.redirect(authUrl);
+  return;
+};
+
+export const googleAuthCallback = async (req: Request, res: Response): Promise<Response | void> => {
+  if (!env.GOOGLE_CLIENT_SECRET) {
+    res.redirect(buildClientRedirect({ auth_error: "Google OAuth is not configured" }));
+    return;
+  }
+
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  if (!code) {
+    res.redirect(buildClientRedirect({ auth_error: "Missing Google authorization code" }));
+    return;
+  }
+
+  const redirectUri = resolveGoogleRedirectUri(req);
+  const oauthClient = new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, redirectUri);
+
+  let tokens: {
+    access_token?: string | null;
+    id_token?: string | null;
+  };
+
+  try {
+    const tokenResponse = await oauthClient.getToken({ code, redirect_uri: redirectUri });
+    tokens = tokenResponse.tokens;
+  } catch {
+    res.redirect(buildClientRedirect({ auth_error: "Invalid or expired Google authorization code" }));
+    return;
+  }
+
+  let identity: GoogleIdentity | null = null;
+
+  if (tokens.id_token) {
+    try {
+      const idTicket = await googleVerifierClient.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: env.GOOGLE_CLIENT_ID
+      });
+
+      const payload = idTicket.getPayload();
+      if (payload?.email) {
+        identity = {
+          email: payload.email,
+          name: payload.name,
+          picture: payload.picture,
+          sub: payload.sub
+        };
+      }
+    } catch {
+      identity = null;
+    }
+  }
+
+  if (!identity && tokens.access_token) {
+    try {
+      const { data } = await axios.get<{
+        email?: string;
+        name?: string;
+        picture?: string;
+        sub?: string;
+      }>("https://openidconnect.googleapis.com/v1/userinfo", {
+        headers: {
+          Authorization: `Bearer ${tokens.access_token}`
+        }
+      });
+
+      if (data.email) {
+        identity = {
+          email: data.email,
+          name: data.name,
+          picture: data.picture,
+          sub: data.sub
+        };
+      }
+    } catch {
+      identity = null;
+    }
+  }
+
+  if (!identity?.email) {
+    res.redirect(buildClientRedirect({ auth_error: "Unable to read Google user profile" }));
+    return;
+  }
+
+  const user = await upsertGoogleUser(identity);
+  const token = signJwt({ userId: String(user._id), email: user.email, name: user.name });
+
+  const stateRaw = typeof req.query.state === "string" ? req.query.state : "";
+  let returnTo = "/profile";
+  if (stateRaw) {
+    try {
+      const parsed = JSON.parse(Buffer.from(stateRaw, "base64url").toString("utf-8")) as { returnTo?: string };
+      if (parsed.returnTo && parsed.returnTo.startsWith("/")) {
+        returnTo = parsed.returnTo;
+      }
+    } catch {
+      returnTo = "/profile";
+    }
+  }
+
+  const redirectUrl = new URL(returnTo, env.CLIENT_URL);
+  redirectUrl.searchParams.set("token", token);
+  redirectUrl.searchParams.set("oauth", "google");
+
+  res.redirect(redirectUrl.toString());
+  return;
 };
 
 export const me = async (req: Request, res: Response): Promise<Response> => {

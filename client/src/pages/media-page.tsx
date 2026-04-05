@@ -16,6 +16,7 @@ export const MediaPage = ({ type }: Props) => {
 
   const playAudio = usePlayerStore((state) => state.playAudio);
   const playVideo = usePlayerStore((state) => state.playVideo);
+  const updateVideoSession = usePlayerStore((state) => state.updateVideoSession);
 
   const search = useMediaSearch(query, type);
 
@@ -34,6 +35,11 @@ export const MediaPage = ({ type }: Props) => {
     return all;
   }, [search.data?.pages]);
 
+  useEffect(() => {
+    if (type !== "music" || items.length === 0) return;
+    mediaApi.prefetchStreams(items.slice(0, 8).map((item) => item.id));
+  }, [items, type]);
+
   // Stable infinite scroll trigger
   const triggerNextPage = useCallback(() => {
     if (search.hasNextPage && !search.isFetchingNextPage) {
@@ -49,29 +55,26 @@ export const MediaPage = ({ type }: Props) => {
   // but still use YouTube URL for the actual player.
   // ------------------------------------------------------------------
   const onPlay = async (item: MediaItem) => {
-    if (loadingItemId === item.id) return;
-
     setActionMessage(null);
     setLoadingItemId(item.id);
 
     try {
       if (item.type === "music") {
-        // ── Music: play directly via YouTube IFrame — no proxy needed ──────
         playAudio(
           item,
           { url: `https://www.youtube.com/watch?v=${item.id}`, mimeType: "audio/mpeg" },
           items
         );
       } else {
-        // ── Video: fetch related videos in background, play immediately ─────
-        // Start playing right away so the user doesn't wait
         playVideo(item, [], []);
-
-        // Then fetch related in background (non-blocking)
         mediaApi.streams(item.id).then((stream) => {
-          const related = stream.related ?? [];
-          // Update video session with related videos
-          playVideo(item, [], related);
+          updateVideoSession(item.id, {
+            related: stream.related ?? [],
+            description: stream.description,
+            uploader: stream.uploader,
+            uploaderAvatarUrl: stream.uploaderAvatarUrl ?? null,
+            likes: stream.likes ?? null
+          });
         }).catch(() => {
           // Related fetch failed — video still plays, just no related list
         });

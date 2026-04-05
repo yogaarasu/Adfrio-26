@@ -17,8 +17,21 @@ type VideoSession = {
   active: boolean;
   title: string;
   poster: string;
+  description: string;
+  uploader: string;
+  uploaderAvatarUrl: string | null;
+  likes: number | null;
   sources: VideoSource[];
   related: MediaItem[];
+};
+
+type VideoExtras = {
+  related?: MediaItem[];
+  description?: string;
+  uploader?: string;
+  uploaderAvatarUrl?: string | null;
+  likes?: number | null;
+  sources?: VideoSource[];
 };
 
 type PlayerState = {
@@ -34,7 +47,9 @@ type PlayerState = {
   audioError: string | null;
   setQueue: (queue: MediaItem[]) => void;
   playAudio: (media: MediaItem, source: AudioSource, queue?: MediaItem[]) => void;
-  playVideo: (media: MediaItem, sources: VideoSource[], related?: MediaItem[]) => void;
+  playVideo: (media: MediaItem, sources: VideoSource[], extras?: MediaItem[] | VideoExtras) => void;
+  updateVideoSession: (mediaId: string, updates: VideoExtras) => void;
+  openVideoOverlay: () => void;
   pauseAll: () => void;
   resumeAudio: () => void;
   setPlaying: (playing: boolean) => void;
@@ -52,6 +67,10 @@ const emptyVideoSession: VideoSession = {
   active: false,
   title: "",
   poster: "",
+  description: "",
+  uploader: "",
+  uploaderAvatarUrl: null,
+  likes: null,
   sources: [],
   related: [],
 };
@@ -79,21 +98,65 @@ export const usePlayerStore = create<PlayerState>()(
           video: emptyVideoSession,
           queue: queue ?? get().queue,
           playing: true,
+          currentTime: 0,
+          duration: 0,
           audioError: null,
         });
       },
 
-      playVideo: (media, sources, related = []) => {
+      playVideo: (media, sources, extras = []) => {
+        const normalized: VideoExtras = Array.isArray(extras) ? { related: extras } : extras;
+        const resolvedSources = normalized.sources ?? sources;
         set({
           current: media,
+          audio: { url: `https://www.youtube.com/watch?v=${media.id}`, mimeType: "audio/mpeg" },
           playing: true,
+          currentTime: 0,
+          duration: 0,
           video: {
             active: true,
             title: media.title,
             poster: media.thumbnail,
-            sources,
-            related,
+            description: normalized.description ?? "",
+            uploader: normalized.uploader ?? media.creator ?? "",
+            uploaderAvatarUrl: normalized.uploaderAvatarUrl ?? null,
+            likes: normalized.likes ?? null,
+            sources: resolvedSources,
+            related: normalized.related ?? [],
           },
+        });
+      },
+
+      updateVideoSession: (mediaId, updates) => {
+        const state = get();
+        if (!state.current || state.current.type !== "video" || state.current.id !== mediaId) {
+          return;
+        }
+        set({
+          video: {
+            ...state.video,
+            related: updates.related ?? state.video.related,
+            description: updates.description ?? state.video.description,
+            uploader: updates.uploader ?? state.video.uploader,
+            uploaderAvatarUrl:
+              updates.uploaderAvatarUrl === undefined
+                ? state.video.uploaderAvatarUrl
+                : updates.uploaderAvatarUrl,
+            likes: updates.likes === undefined ? state.video.likes : updates.likes,
+            sources: updates.sources ?? state.video.sources,
+          },
+        });
+      },
+
+      openVideoOverlay: () => {
+        const current = get().current;
+        if (!current || current.type !== "video") return;
+        const previous = get().video;
+        set({
+          video: {
+            ...previous,
+            active: true,
+          }
         });
       },
 
@@ -139,11 +202,14 @@ export const usePlayerStore = create<PlayerState>()(
         );
       },
 
-      // Stop video overlay; resume audio player if a track is loaded
+      // Stop video overlay and pause playback.
       clearVideo: () =>
         set({
-          video: emptyVideoSession,
-          playing: Boolean(get().audio),
+          video: {
+            ...get().video,
+            active: false,
+          },
+          playing: false,
         }),
 
       setAudioError: (error) => set({ audioError: error }),

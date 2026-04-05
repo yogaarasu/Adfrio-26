@@ -15,6 +15,8 @@ export type StreamResponse = {
   description: string;
   thumbnail: string;
   uploader: string;
+  uploaderAvatarUrl?: string | null;
+  likes?: number | null;
   audio: Array<{ url: string; mimeType?: string; bitrate?: number }>;
   video: Array<{ url: string; quality: string; format: string }>;
   related: MediaItem[];

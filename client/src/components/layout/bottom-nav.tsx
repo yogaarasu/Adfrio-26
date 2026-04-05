@@ -1,12 +1,12 @@
-﻿import { NavLink } from "react-router-dom";
-import { Headphones, User, Video, Library } from "lucide-react";
+import { NavLink } from "react-router-dom";
+import { Home, Search, Library, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
-  { path: "/music", label: "Music", icon: Headphones },
-  { path: "/videos", label: "Videos", icon: Video },
+  { path: "/home", label: "Home", icon: Home },
+  { path: "/search", label: "Search", icon: Search },
   { path: "/library", label: "Library", icon: Library },
-  { path: "/account", label: "Account", icon: User }
+  { path: "/profile", label: "Profile", icon: User }
 ];
 
 export const BottomNav = () => (

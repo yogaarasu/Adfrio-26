@@ -1,12 +1,3 @@
-/**
- * global-audio-player.tsx
- * ─────────────────────────────────────────────────────────────────────────────
- * Persistent music player bar rendered at the bottom of every page.
- *
- * KEY FIX: YouTube IFrame API refuses to stream audio when the player element
- * is inside a `display:none` container. We now render ReactPlayer as a 1×1px
- * element fixed off-screen (still "visible" to the browser) so audio flows.
- */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Pause,
@@ -22,27 +13,34 @@ import {
   Music,
 } from "lucide-react";
 import _ReactPlayer from "react-player";
-const ReactPlayer = _ReactPlayer as any;
 import { Button } from "@/components/ui/button";
 import { usePlayerStore } from "@/store/player-store";
 import { useMediaSession } from "@/hooks/use-media-session";
 import { SleepTimer } from "@/components/player/sleep-timer";
 import { formatDuration } from "@/lib/utils";
 
-// ─── Error code → human-readable label ──────────────────────────────
+const ReactPlayer = _ReactPlayer as any;
+
 const YT_ERROR_LABELS: Record<number, string> = {
   2: "Invalid video ID provided",
   5: "HTML5 player error",
-  100: "Video not found or was removed",
+  100: "Video not found or removed",
   101: "Owner disabled embedded playback",
   150: "Owner disabled embedded playback",
+};
+
+type ProgressState = {
+  playedSeconds?: number;
 };
 
 export const GlobalAudioPlayer = () => {
   const recoveredIdRef = useRef<string | null>(null);
   const playerRef = useRef<any | null>(null);
+  const seekLockUntilRef = useRef(0);
+  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const current = usePlayerStore((s) => s.current);
+  const audio = usePlayerStore((s) => s.audio);
   const video = usePlayerStore((s) => s.video);
   const playing = usePlayerStore((s) => s.playing);
   const volume = usePlayerStore((s) => s.volume);
@@ -56,82 +54,138 @@ export const GlobalAudioPlayer = () => {
   const setVolume = usePlayerStore((s) => s.setVolume);
   const playAudio = usePlayerStore((s) => s.playAudio);
   const setAudioError = usePlayerStore((s) => s.setAudioError);
+  const openVideoOverlay = usePlayerStore((s) => s.openVideoOverlay);
 
-  const [isReady, setIsReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
-  // Sync internal state when track changes
-  useEffect(() => {
-    if (current?.id) {
-      setIsReady(false);
-      setIsLoading(true);
-      setAudioError(null);
-      recoveredIdRef.current = null;
+  const clearLoadingTimeout = useCallback(() => {
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
     }
-  }, [current?.id, setAudioError]);
+  }, []);
 
-  // ── Recovery mechanism for blocked tracks ───────────────────────────────────
+  const setLoadingWithGuard = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        clearLoadingTimeout();
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      clearLoadingTimeout();
+      loadingTimeoutRef.current = setTimeout(() => {
+        setIsLoading(false);
+      }, 3000);
+    },
+    [clearLoadingTimeout]
+  );
+
+  useEffect(() => {
+    if (!current?.id) return;
+    setLoadingWithGuard(true);
+    setAudioError(null);
+    recoveredIdRef.current = null;
+  }, [current?.id, setAudioError, setLoadingWithGuard]);
+
+  useEffect(
+    () => () => {
+      clearLoadingTimeout();
+    },
+    [clearLoadingTimeout]
+  );
+
   const recoverCurrentTrack = useCallback(async () => {
     if (!current) return;
     if (recoveredIdRef.current === current.id) {
-      console.warn("[audio] Recovery already attempted for", current.id, "— giving up");
       setPlaying(false);
       setAudioError("This track cannot be played. It may be region-restricted or embedding disabled.");
       return;
     }
 
     recoveredIdRef.current = current.id;
-    console.warn("[audio] → Attempting stream recovery/re-mount for", current.id);
-
-    setIsReady(false);
-    setIsLoading(true);
+    setLoadingWithGuard(true);
     setAudioError(null);
 
     setTimeout(() => {
       setPlaying(true);
     }, 600);
-  }, [current, setPlaying, setAudioError]);
+  }, [current, setAudioError, setLoadingWithGuard, setPlaying]);
 
-  // ── Queue navigation ────────────────────────────────────────────────────────
   const jump = useCallback(
     (dir: -1 | 1) => {
       if (!current || queue.length < 2) return;
-      const idx = queue.findIndex((e) => e.id === current.id);
+      const idx = queue.findIndex((entry) => entry.id === current.id);
       if (idx === -1) return;
       const next = queue[(idx + dir + queue.length) % queue.length];
       if (!next) return;
-      // Build the YouTube URL for the next track the same way media-page does
-      playAudio(
-        next,
-        { url: `https://www.youtube.com/watch?v=${next.id}`, mimeType: "audio/mpeg" },
-        queue
-      );
+      playAudio(next, { url: `https://www.youtube.com/watch?v=${next.id}`, mimeType: "audio/mpeg" }, queue);
     },
     [current, playAudio, queue]
   );
 
-  // ── Seek callbacks ──────────────────────────────────────────────────────────
-  const onSeekBy = useCallback((seconds: number) => {
-    if (!playerRef.current) return;
-    const pos = playerRef.current.currentTime || 0;
-    const dur = playerRef.current.duration || 0;
-    const next = Math.max(0, Math.min(dur, pos + seconds));
-    playerRef.current.currentTime = next;
+  const readCurrentTime = useCallback((): number => {
+    const player = playerRef.current;
+    if (!player) return 0;
+    const viaApi = typeof player.getCurrentTime === "function" ? Number(player.getCurrentTime()) : NaN;
+    if (Number.isFinite(viaApi)) return viaApi;
+    const viaProp = Number(player.currentTime);
+    return Number.isFinite(viaProp) ? viaProp : 0;
   }, []);
 
-  const onSeekTo = useCallback((time: number) => {
-    if (!playerRef.current) return;
-    playerRef.current.currentTime = time;
+  const readDuration = useCallback((): number => {
+    const player = playerRef.current;
+    if (!player) return 0;
+    const viaApi = typeof player.getDuration === "function" ? Number(player.getDuration()) : NaN;
+    if (Number.isFinite(viaApi)) return viaApi;
+    const viaProp = Number(player.duration);
+    return Number.isFinite(viaProp) ? viaProp : 0;
   }, []);
 
-  const onTogglePlay = useCallback(
-    () => setPlaying(!playing),
-    [playing, setPlaying]
+  const seekToSeconds = useCallback(
+    (seconds: number, showLoading = true) => {
+      const player = playerRef.current;
+      if (!player) return;
+
+      const maxDuration = readDuration() || duration || Number.MAX_SAFE_INTEGER;
+      const bounded = Math.max(0, Math.min(maxDuration, seconds));
+
+      seekLockUntilRef.current = Date.now() + 700;
+      if (showLoading && playing) setLoadingWithGuard(true);
+      setProgress(bounded, readDuration() || duration || 0);
+
+      if (typeof player.seekTo === "function") {
+        player.seekTo(bounded, "seconds");
+        return;
+      }
+
+      player.currentTime = bounded;
+    },
+    [duration, playing, readDuration, setLoadingWithGuard, setProgress]
   );
 
+  const onSeekBy = useCallback(
+    (seconds: number) => {
+      const position = readCurrentTime();
+      seekToSeconds(position + seconds);
+    },
+    [readCurrentTime, seekToSeconds]
+  );
+
+  const onSeekTo = useCallback(
+    (time: number) => {
+      seekToSeconds(time);
+    },
+    [seekToSeconds]
+  );
+
+  const onTogglePlay = useCallback(() => {
+    setPlaying(!playing);
+  }, [playing, setPlaying]);
+
   const onToggleMute = useCallback(() => {
-    setIsMuted((m) => !m);
+    setIsMuted((value) => !value);
   }, []);
 
   useMediaSession({
@@ -142,21 +196,16 @@ export const GlobalAudioPlayer = () => {
     onSeekTo,
   });
 
+  if (!current || !audio) return null;
+
   const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
-
-  if (!current) return null;
-
-  const showUI = current && !video.active;
-  const ytUrl = `https://www.youtube.com/watch?v=${current.id}`;
+  const sourceUrl = audio.url;
+  const isYouTubeSource = /(?:youtube\.com|youtu\.be)/i.test(sourceUrl);
+  const fallbackYoutubeUrl = `https://www.youtube.com/watch?v=${current.id}`;
+  const canReopenVideo = current.type === "video" && !video.active;
 
   return (
     <>
-      {/*
-        ── KEY FIX ────────────────────────────────────────────────────────────
-        ReactPlayer/YouTube IFrame MUST be "visible" to the browser (not inside
-        display:none) to produce audio. We position it 1×1px fixed off-screen.
-        The browser still considers it a live document element → audio streams.
-      */}
       <div
         aria-hidden="true"
         style={{
@@ -171,66 +220,116 @@ export const GlobalAudioPlayer = () => {
           zIndex: -1,
         }}
       >
-        {current && (
-          <ReactPlayer
-            ref={playerRef}
-            src={ytUrl}
-            playing={playing && !video.active}
-            volume={isMuted ? 0 : volume}
-            muted={isMuted}
-            width="1px"
-            height="1px"
-            config={{
-              youtube: {
-                autoplay: 1,
-                playsinline: 1,
-                modestbranding: 1,
-                rel: 0,
-                iv_load_policy: 3,
-                vq: "hd1080",
-              },
-            }}
-            onReady={() => {
-              setIsReady(true);
-              setIsLoading(false);
-              setAudioError(null);
-            }}
-            onWaiting={() => setIsLoading(true)}
-            onPlaying={() => setIsLoading(false)}
-            onDurationChange={(e: any) => setProgress(currentTime, e.currentTarget.duration)}
-            onTimeUpdate={(e: any) => setProgress(e.currentTarget.currentTime, duration)}
-            onEnded={() => {
-              jump(1);
-            }}
-            onError={(e: any, data?: any) => {
-              const code = typeof e === "number" ? e : data?.code;
-              const label =
-                (typeof code === "number" ? YT_ERROR_LABELS[code] : null) ??
-                (e instanceof Error ? e.message : String(e ?? "Unknown player error"));
-              console.error(`[audio] ❌ ReactPlayer Error — ${label}`, { e, data });
-              setAudioError(
-                label.includes("embedded")
-                  ? "This song cannot be embedded (owner restricted)."
-                  : `Playback failed: ${label}`
-              );
-              setIsLoading(false);
-              setPlaying(false);
-              void recoverCurrentTrack();
-            }}
-          />
-        )}
+        <ReactPlayer
+          key={`audio-${current.id}`}
+          ref={playerRef}
+          src={sourceUrl}
+          playing={playing && !video.active}
+          volume={isMuted ? 0 : volume}
+          muted={isMuted}
+          width="1px"
+          height="1px"
+          progressInterval={500}
+          config={
+            isYouTubeSource
+              ? {
+                  youtube: {
+                    playerVars: {
+                      autoplay: 1,
+                      playsinline: 1,
+                      modestbranding: 1,
+                      rel: 0,
+                      iv_load_policy: 3,
+                      vq: "small",
+                    },
+                  },
+                }
+              : {
+                  file: {
+                    attributes: {
+                      preload: "auto",
+                    },
+                  },
+                }
+          }
+          onReady={() => {
+            setAudioError(null);
+            setLoadingWithGuard(false);
+          }}
+          onDuration={(nextDuration: number) => {
+            const safeDuration = Number(nextDuration) || readDuration() || duration;
+            const safeTime = readCurrentTime() || currentTime;
+            setProgress(safeTime, safeDuration);
+          }}
+          onProgress={(state: ProgressState) => {
+            if (Date.now() < seekLockUntilRef.current) return;
+            const safeTime = Number(state.playedSeconds) || readCurrentTime();
+            const safeDuration = readDuration() || duration;
+            setProgress(safeTime, safeDuration);
+            if (playing && safeTime > 0.2) {
+              setLoadingWithGuard(false);
+            }
+          }}
+          onWaiting={() => {
+            if (playing) setLoadingWithGuard(true);
+          }}
+          onPlaying={() => {
+            setLoadingWithGuard(false);
+            seekLockUntilRef.current = 0;
+          }}
+          onPause={() => {
+            setLoadingWithGuard(false);
+          }}
+          onEnded={() => {
+            jump(1);
+          }}
+          onError={(e: any, data?: any) => {
+            const code = typeof e === "number" ? e : data?.code;
+            const fallbackMessage =
+              typeof data?.message === "string"
+                ? data.message
+                : typeof e?.message === "string"
+                ? e.message
+                : "Playback source error";
+
+            const label =
+              (typeof code === "number" ? YT_ERROR_LABELS[code] : null) ??
+              (e instanceof Error ? e.message : fallbackMessage);
+
+            console.error(`[audio] ReactPlayer error: ${label}`, { e, data });
+            setAudioError(
+              label.includes("embedded")
+                ? "This song cannot be embedded (owner restricted)."
+                : `Playback failed: ${label}`
+            );
+            setLoadingWithGuard(false);
+            setPlaying(false);
+
+            if (!isYouTubeSource) {
+              playAudio(current, { url: fallbackYoutubeUrl, mimeType: "audio/mpeg" }, queue);
+              return;
+            }
+
+            void recoverCurrentTrack();
+          }}
+        />
       </div>
 
-      {showUI && (
+      {!video.active ? (
         <div
           className="fixed bottom-16 left-0 right-0 z-50 border-t border-white/20 bg-black/95 px-4 py-3 backdrop-blur-md md:bottom-0"
           role="region"
           aria-label="Audio player"
+          onClick={() => {
+            if (canReopenVideo) {
+              openVideoOverlay();
+            }
+          }}
         >
-          {/* ── Seek progress bar ──────────────────────────────────────────────── */}
           <div
             className="group mb-3 h-1.5 w-full cursor-pointer rounded-full bg-white/15"
             onClick={(e) => {
+              e.stopPropagation();
               if (!duration) return;
               const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
               const ratio = (e.clientX - rect.left) / rect.width;
@@ -243,8 +342,14 @@ export const GlobalAudioPlayer = () => {
             aria-valuemax={100}
             tabIndex={0}
             onKeyDown={(e) => {
-              if (e.key === "ArrowRight") onSeekBy(10);
-              if (e.key === "ArrowLeft") onSeekBy(-10);
+              if (e.key === "ArrowRight") {
+                e.preventDefault();
+                onSeekBy(10);
+              }
+              if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                onSeekBy(-10);
+              }
             }}
           >
             <div
@@ -255,45 +360,37 @@ export const GlobalAudioPlayer = () => {
             </div>
           </div>
 
-          {/* ── Error banner ────────────────────────────────────────────────────── */}
-          {audioError && (
+          {audioError ? (
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-red-500/20 px-3 py-1.5 text-xs text-red-300">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               <span>{audioError}</span>
             </div>
-          )}
+          ) : null}
 
-          {/* ── Controls row ────────────────────────────────────────────────────── */}
-          <div className="flex items-center gap-3">
-            {/* Thumbnail + track info */}
+          <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
             <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg shadow-lg">
               {current.thumbnail ? (
-                <img
-                  src={current.thumbnail}
-                  alt={current.title}
-                  className="h-full w-full object-cover"
-                />
+                <img src={current.thumbnail} alt={current.title} className="h-full w-full object-cover" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-white/10">
                   <Music className="h-5 w-5 text-white/50" />
                 </div>
               )}
-              {isLoading && (
+              {isLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                   <Loader2 className="h-4 w-4 animate-spin text-white" />
                 </div>
-              )}
+              ) : null}
             </div>
+
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{current.title}</p>
               <p className="truncate text-xs text-white/60">{current.creator}</p>
               <p className="text-xs text-white/40">
-                {formatDuration(Math.floor(currentTime))} /{" "}
-                {formatDuration(Math.floor(duration))}
+                {formatDuration(Math.floor(currentTime))} / {formatDuration(Math.floor(duration))}
               </p>
             </div>
 
-            {/* Playback buttons */}
             <div className="flex items-center gap-1">
               <Button
                 variant="ghost"
@@ -305,12 +402,7 @@ export const GlobalAudioPlayer = () => {
                 <SkipBack className="h-4 w-4" />
               </Button>
 
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onSeekBy(-10)}
-                aria-label="Rewind 10 seconds"
-              >
+              <Button variant="ghost" size="icon" onClick={() => onSeekBy(-10)} aria-label="Rewind 10 seconds">
                 <Rewind className="h-4 w-4" />
               </Button>
 
@@ -318,7 +410,7 @@ export const GlobalAudioPlayer = () => {
                 variant="default"
                 size="icon"
                 onClick={onTogglePlay}
-                disabled={isLoading}
+                disabled={isLoading && playing}
                 className="h-10 w-10 rounded-full bg-indigo-600 hover:bg-indigo-500"
                 aria-label={playing ? "Pause" : "Play"}
               >
@@ -331,12 +423,7 @@ export const GlobalAudioPlayer = () => {
                 )}
               </Button>
 
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onSeekBy(10)}
-                aria-label="Skip 10 seconds"
-              >
+              <Button variant="ghost" size="icon" onClick={() => onSeekBy(10)} aria-label="Skip 10 seconds">
                 <FastForward className="h-4 w-4" />
               </Button>
 
@@ -351,12 +438,11 @@ export const GlobalAudioPlayer = () => {
               </Button>
             </div>
 
-            {/* Volume control */}
             <div className="hidden items-center gap-2 md:flex">
               <button
                 onClick={onToggleMute}
                 aria-label={isMuted ? "Unmute" : "Mute"}
-                className="text-white/60 hover:text-white transition-colors"
+                className="text-white/60 transition-colors hover:text-white"
               >
                 {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
               </button>
@@ -377,13 +463,12 @@ export const GlobalAudioPlayer = () => {
               />
             </div>
 
-            {/* Sleep timer */}
             <div className="hidden md:block">
               <SleepTimer />
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </>
   );
 };

@@ -282,11 +282,65 @@ export type VideoInfo = {
   description: string;
   thumbnail: string;
   uploader: string;
+  uploaderAvatarUrl: string | null;
+  likes: number | null;
   audioStreams: Array<{ url: string; mimeType: string; bitrate: number }>;
   videoStreams: Array<{ url: string; quality: string; mimeType: string }>;
   related: MediaItem[];
   hls: string | null;
   dash: string | null;
+};
+
+const MIN_RELATED_VIDEOS = 20;
+
+const dedupeRelatedVideos = (items: MediaItem[], excludeId: string): MediaItem[] => {
+  const seen = new Set<string>();
+  const unique: MediaItem[] = [];
+  for (const item of items) {
+    if (!item.id) continue;
+    if (item.id === excludeId) continue;
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    unique.push(item);
+  }
+  return unique;
+};
+
+const fetchFallbackRelatedVideos = async (
+  query: string,
+  excludeId: string,
+  existingIds: Set<string>,
+  neededCount: number
+): Promise<MediaItem[]> => {
+  if (neededCount <= 0) return [];
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return [];
+
+  try {
+    const candidates = await innertubeSearch(trimmedQuery, Math.max(neededCount * 3, 36));
+    const fallback: MediaItem[] = [];
+
+    for (const item of candidates) {
+      if (!item.id) continue;
+      if (item.id === excludeId) continue;
+      if (existingIds.has(item.id)) continue;
+      existingIds.add(item.id);
+      fallback.push({
+        id: item.id,
+        title: item.title,
+        creator: item.creator,
+        thumbnail: item.thumbnail,
+        duration: item.duration,
+        type: "video",
+        youtubeUrl: `https://www.youtube.com/watch?v=${item.id}`,
+      });
+      if (fallback.length >= neededCount) break;
+    }
+
+    return fallback;
+  } catch {
+    return [];
+  }
 };
 
 export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
@@ -299,7 +353,7 @@ export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
     const data = await innertubeGetStreams(cleanId);
 
     // Use the real related metadata parsed from watch_next_feed
-    const related: MediaItem[] = (data.related ?? []).map((r) => ({
+    let related: MediaItem[] = (data.related ?? []).map((r) => ({
       id: r.id,
       title: r.title,
       creator: r.creator,
@@ -308,12 +362,26 @@ export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
       type: "video" as const,
       youtubeUrl: `https://www.youtube.com/watch?v=${r.id}`,
     }));
+    related = dedupeRelatedVideos(related, cleanId);
+
+    if (related.length < MIN_RELATED_VIDEOS) {
+      const knownIds = new Set(related.map((item) => item.id));
+      const fallbackRelated = await fetchFallbackRelatedVideos(
+        `${data.title} ${data.uploader}`,
+        cleanId,
+        knownIds,
+        MIN_RELATED_VIDEOS - related.length
+      );
+      related = dedupeRelatedVideos([...related, ...fallbackRelated], cleanId);
+    }
 
     return {
       title: data.title,
       description: data.description,
       thumbnail: data.thumbnail,
       uploader: data.uploader,
+      uploaderAvatarUrl: data.uploaderAvatarUrl,
+      likes: data.likes,
       audioStreams: data.audioStreams,
       videoStreams: data.videoStreams,
       related,
@@ -328,16 +396,26 @@ export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
   await initPlayDl();
   try {
     const info = await play.video_info(`https://www.youtube.com/watch?v=${cleanId}`);
+    const title = info.video_details.title ?? "Unknown Title";
+    const uploader = info.video_details.channel?.name ?? "Unknown Creator";
+    const related = await fetchFallbackRelatedVideos(
+      `${title} ${uploader}`,
+      cleanId,
+      new Set<string>(),
+      MIN_RELATED_VIDEOS
+    );
     return {
-      title: info.video_details.title ?? "Unknown Title",
+      title,
       description: info.video_details.description ?? "",
       thumbnail:
         info.video_details.thumbnails?.[info.video_details.thumbnails.length - 1]?.url ??
         `https://i.ytimg.com/vi/${cleanId}/hqdefault.jpg`,
-      uploader: info.video_details.channel?.name ?? "Unknown Creator",
+      uploader,
+      uploaderAvatarUrl: info.video_details.channel?.icons?.[0]?.url ?? null,
+      likes: null,
       audioStreams: [],
       videoStreams: [],
-      related: [],
+      related,
       hls: null,
       dash: null,
     };
@@ -351,6 +429,8 @@ export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
     description: "",
     thumbnail: `https://i.ytimg.com/vi/${cleanId}/hqdefault.jpg`,
     uploader: "YouTube",
+    uploaderAvatarUrl: null,
+    likes: null,
     audioStreams: [],
     videoStreams: [],
     related: [],
