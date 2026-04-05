@@ -19,6 +19,7 @@ import _ReactPlayer from "react-player";
 import { Button } from "@/components/ui/button";
 import { mediaApi, playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
+import { usePreferencesStore } from "@/store/preferences-store";
 import type { MediaItem } from "@/types/media";
 import { formatDuration } from "@/lib/utils";
 
@@ -58,6 +59,8 @@ export const GlobalVideoPlayer = () => {
   const playing = usePlayerStore((state) => state.playing);
   const playVideo = usePlayerStore((state) => state.playVideo);
   const updateVideoSession = usePlayerStore((state) => state.updateVideoSession);
+  const videoAutoplay = usePreferencesStore((state) => state.videoAutoplay);
+  const setVideoAutoplay = usePreferencesStore((state) => state.setVideoAutoplay);
 
   const [relatedError, setRelatedError] = useState<string | null>(null);
   const [loadingRelatedId, setLoadingRelatedId] = useState<string | null>(null);
@@ -75,6 +78,8 @@ export const GlobalVideoPlayer = () => {
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relatedHydrationRef = useRef<Set<string>>(new Set());
   const seekLockUntilRef = useRef(0);
+  const pendingSeekRef = useRef<number | null>(null);
+  const seekRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const playerRef = useRef<any | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -123,6 +128,7 @@ export const GlobalVideoPlayer = () => {
   useEffect(() => {
     return () => {
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      if (seekRetryTimeoutRef.current) clearTimeout(seekRetryTimeoutRef.current);
     };
   }, []);
 
@@ -144,21 +150,46 @@ export const GlobalVideoPlayer = () => {
     return Number.isFinite(viaProp) ? viaProp : 0;
   }, []);
 
-  const seekToSeconds = useCallback((seconds: number) => {
+  const applySeek = useCallback((seconds: number) => {
     const player = playerRef.current;
     if (!player) return;
+    if (typeof player.fastSeek === "function") {
+      player.fastSeek(seconds);
+      return;
+    }
+    if ("currentTime" in player) {
+      player.currentTime = seconds;
+      return;
+    }
+    if (typeof player.seekTo === "function") {
+      player.seekTo(seconds, "seconds");
+    }
+  }, []);
+
+  const seekToSeconds = useCallback((seconds: number) => {
     const dur = readDuration();
     const next = Math.max(0, Math.min(dur || Number.MAX_SAFE_INTEGER, seconds));
-    seekLockUntilRef.current = Date.now() + 700;
+    pendingSeekRef.current = next;
+    seekLockUntilRef.current = Date.now() + 1500;
     if (playing) setIsBuffering(true);
     setCurrentTime(next);
     setProgress(next, dur || duration);
-    if (typeof player.seekTo === "function") {
-      player.seekTo(next, "seconds");
-      return;
+
+    applySeek(next);
+
+    if (seekRetryTimeoutRef.current) {
+      clearTimeout(seekRetryTimeoutRef.current);
     }
-    player.currentTime = next;
-  }, [duration, playing, readDuration, setProgress]);
+    seekRetryTimeoutRef.current = setTimeout(() => {
+      const target = pendingSeekRef.current;
+      if (target === null) return;
+      const now = readCurrentTime();
+      if (now + 1 < target) {
+        applySeek(target);
+        seekLockUntilRef.current = Date.now() + 1200;
+      }
+    }, 450);
+  }, [applySeek, duration, playing, readCurrentTime, readDuration, setProgress]);
 
   const seekBy = useCallback((seconds: number) => {
     const curr = readCurrentTime();
@@ -170,6 +201,56 @@ export const GlobalVideoPlayer = () => {
     if (!dur) return;
     seekToSeconds(ratio * dur);
   }, [duration, readDuration, seekToSeconds]);
+
+  const syncCaptions = useCallback((enabled: boolean) => {
+    const player = playerRef.current as {
+      textTracks?: TextTrackList;
+    } | null;
+    const tracks = player?.textTracks ? Array.from(player.textTracks) : [];
+    if (!tracks.length) return;
+
+    tracks.forEach((track, index) => {
+      track.mode = enabled && index === 0 ? "showing" : "disabled";
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const t1 = setTimeout(() => syncCaptions(captionsEnabled), 250);
+    const t2 = setTimeout(() => syncCaptions(captionsEnabled), 900);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [captionsEnabled, isOpen, syncCaptions, current?.id]);
+
+  const handlePlaybackTick = useCallback((nextTime: number, nextDuration: number) => {
+    const safeTime = Number.isFinite(nextTime) ? nextTime : readCurrentTime();
+    const safeDuration = Number.isFinite(nextDuration) && nextDuration > 0
+      ? nextDuration
+      : readDuration() || duration;
+
+    const pendingTarget = pendingSeekRef.current;
+    if (pendingTarget !== null) {
+      if (safeTime >= Math.max(0, pendingTarget - 1)) {
+        pendingSeekRef.current = null;
+        if (seekRetryTimeoutRef.current) {
+          clearTimeout(seekRetryTimeoutRef.current);
+          seekRetryTimeoutRef.current = null;
+        }
+        setIsBuffering(false);
+      } else if (Date.now() >= seekLockUntilRef.current) {
+        applySeek(pendingTarget);
+        seekLockUntilRef.current = Date.now() + 1000;
+        return;
+      } else {
+        return;
+      }
+    }
+
+    setCurrentTime(safeTime);
+    setProgress(safeTime, safeDuration);
+  }, [applySeek, duration, readCurrentTime, readDuration, setProgress]);
 
   const addCurrentToFavorites = async () => {
     if (!current || savingToPlaylist) return;
@@ -301,6 +382,7 @@ export const GlobalVideoPlayer = () => {
               onReady={() => {
                 setIsBuffering(false);
                 setVideoError(null);
+                syncCaptions(captionsEnabled);
                 resetControlsTimer();
               }}
               onWaiting={() => setIsBuffering(true)}
@@ -308,19 +390,28 @@ export const GlobalVideoPlayer = () => {
                 setIsBuffering(false);
                 seekLockUntilRef.current = 0;
               }}
-              onDuration={(nextDuration: number) => {
-                const safeDuration = Number(nextDuration) || readDuration();
+              onDurationChange={(e: any) => {
+                const safeDuration = Number(e?.currentTarget?.duration) || readDuration();
                 setDuration(safeDuration);
                 setProgress(readCurrentTime() || currentTime, safeDuration);
               }}
-              onProgress={(state: { playedSeconds?: number }) => {
-                if (Date.now() < seekLockUntilRef.current) return;
-                const nextTime = Number(state.playedSeconds) || readCurrentTime();
-                const nextDuration = readDuration() || duration;
-                setCurrentTime(nextTime);
-                setProgress(nextTime, nextDuration);
+              onTimeUpdate={(e: any) => {
+                const nextTime = Number(e?.currentTarget?.currentTime);
+                const nextDuration = Number(e?.currentTarget?.duration);
+                handlePlaybackTick(nextTime, nextDuration);
               }}
-              onEnded={() => setPlaying(false)}
+              onProgress={(state: { playedSeconds?: number }) => {
+                const nextTime = Number(state.playedSeconds);
+                const nextDuration = readDuration() || duration;
+                handlePlaybackTick(nextTime, nextDuration);
+              }}
+              onEnded={() => {
+                if (videoAutoplay && relatedItems.length > 0) {
+                  void playRelated(relatedItems[0]!);
+                  return;
+                }
+                setPlaying(false);
+              }}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
               onError={(e: any, data?: any) => {
@@ -352,6 +443,11 @@ export const GlobalVideoPlayer = () => {
                 className="group mx-4 mb-2 h-1.5 cursor-pointer rounded-full bg-white/25 hover:h-2.5 transition-all"
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
+                  seekTo((e.clientX - rect.left) / rect.width);
+                }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                   seekTo((e.clientX - rect.left) / rect.width);
                 }}
               >
@@ -388,7 +484,11 @@ export const GlobalVideoPlayer = () => {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCaptionsEnabled((prev) => !prev);
+                    setCaptionsEnabled((prev) => {
+                      const next = !prev;
+                      syncCaptions(next);
+                      return next;
+                    });
                   }}
                   className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
                     captionsEnabled ? "bg-white text-black" : "bg-white/10 text-white hover:bg-white/20"
@@ -397,6 +497,19 @@ export const GlobalVideoPlayer = () => {
                 >
                   <Captions className="h-3.5 w-3.5" />
                   <span>CC</span>
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setVideoAutoplay(!videoAutoplay);
+                  }}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                    videoAutoplay ? "bg-white text-black" : "bg-white/10 text-white hover:bg-white/20"
+                  }`}
+                  aria-label="Toggle autoplay"
+                >
+                  AUTO {videoAutoplay ? "ON" : "OFF"}
                 </button>
 
                 <div className="relative">

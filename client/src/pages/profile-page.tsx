@@ -16,6 +16,8 @@ export const ProfilePage = () => {
   const { user, setSession, logout } = useAuthStore();
   const language = usePreferencesStore((state) => state.language);
   const setLanguage = usePreferencesStore((state) => state.setLanguage);
+  const videoAutoplay = usePreferencesStore((state) => state.videoAutoplay);
+  const setVideoAutoplay = usePreferencesStore((state) => state.setVideoAutoplay);
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -182,6 +184,16 @@ export const ProfilePage = () => {
         </p>
         <Button onClick={() => void installApp()}>
           {installed ? "Installed" : installAvailable ? "Install Adfrio" : "Install Adfrio"}
+        </Button>
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="text-sm uppercase tracking-[0.12em] text-white/70">Video Autoplay</h2>
+        <p className="text-xs text-white/60">
+          When ON, next related video plays automatically after current video ends.
+        </p>
+        <Button onClick={() => setVideoAutoplay(!videoAutoplay)}>
+          {videoAutoplay ? "Autoplay ON" : "Autoplay OFF"}
         </Button>
       </Card>
 
