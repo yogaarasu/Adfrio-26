@@ -178,14 +178,14 @@ export const proxyMediaById = async (
   try {
     const streamInfo = await getStreamSource(id, type as "audio" | "video");
 
-    // ── URL proxy (Innertube or Piped direct URL) ───────────────────────────
+    // ── URL proxy (Piped direct URL) ────────────────────────────────────────
     if ("url" in streamInfo) {
       const targetUrl = streamInfo.url;
       try {
-        console.log(`[proxy] Piping via stream-proxy -> ${targetUrl.substring(0, 50)}...`);
+        console.log(`[proxy] Piping via stream-proxy -> ${targetUrl.substring(0, 60)}...`);
         return await proxyGooglevideoCandidates(req, res, [targetUrl]);
       } catch (proxyErr: any) {
-        console.warn("[proxy] stream-proxy failed, falling back to 302:", proxyErr?.message);
+        console.error("[proxy] stream-proxy failed, 302 redirect:", proxyErr?.message);
         if (!res.headersSent) {
           return res.redirect(302, targetUrl);
         }
@@ -193,13 +193,19 @@ export const proxyMediaById = async (
       }
     }
 
-    // ── Node.js stream (ytdl-core or play-dl) ────────────────────────────────
+    // ── Node.js stream (play-dl or ytdl-core) ────────────────────────────────
     if (!("stream" in streamInfo) || !streamInfo.stream) {
+      console.error("[proxy] No stream object returned from getStreamSource for", id);
       return sendError(res, 502, "No stream object returned from source");
     }
 
     const rawStream = streamInfo.stream;
     const readable: NodeJS.ReadableStream = (rawStream as any).stream ?? rawStream;
+
+    // Prefer the mimeType returned by the extractor; fall back to type-derived default
+    const mimeType =
+      (streamInfo as any).mimeType ??
+      (type === "audio" ? "audio/mpeg" : "video/mp4");
 
     const contentLength: number | undefined =
       typeof (rawStream as any).content_length === "number"
@@ -208,7 +214,6 @@ export const proxyMediaById = async (
         ? (rawStream as any).contentLength
         : undefined;
 
-    const mimeType = type === "audio" ? "audio/mpeg" : "video/mp4";
     const rangeHeader = req.headers.range;
 
     if (contentLength && rangeHeader) {
@@ -222,14 +227,14 @@ export const proxyMediaById = async (
         "Accept-Ranges": "bytes",
         "Content-Length": chunkSize,
         "Content-Type": mimeType,
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "no-cache",
         "X-Adfrio-Proxy": "node-stream",
       });
     } else {
       const headers: Record<string, string | number> = {
         "Accept-Ranges": "bytes",
         "Content-Type": mimeType,
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "no-cache",
         "X-Adfrio-Proxy": "node-stream",
       };
       if (contentLength) headers["Content-Length"] = contentLength;
@@ -241,14 +246,14 @@ export const proxyMediaById = async (
     });
 
     readable.on("error", (err: any) => {
-      console.error("[proxy] stream error:", err?.message ?? err);
+      console.error("[proxy] stream pipe error:", err?.message ?? err);
       if (!res.headersSent) res.statusCode = 502;
       res.end();
     });
 
     readable.pipe(res);
   } catch (error: any) {
-    console.error("[proxy] fatal error:", error?.message ?? error);
+    console.error("[proxy] fatal error for", id, ":", error?.message ?? error);
     if (!res.headersSent) {
       return sendError(res, 502, "Unable to proxy stream — please try again");
     }

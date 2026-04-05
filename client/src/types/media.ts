@@ -1,4 +1,4 @@
-﻿export type MediaType = "music" | "video";
+export type MediaType = "music" | "video";
 
 export type MediaItem = {
   id: string;
@@ -16,7 +16,7 @@ export type StreamResponse = {
   thumbnail: string;
   uploader: string;
   audio: Array<{ url: string; mimeType?: string; bitrate?: number }>;
-  video: Array<{ url: string; quality: string; format: string; codec: string | null }>;
+  video: Array<{ url: string; quality: string; format: string }>;
   related: MediaItem[];
   hls: string | null;
   dash: string | null;

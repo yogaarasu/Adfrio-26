@@ -1,0 +1,2 @@
+��src/components/player/global-audio-player.tsx(173,13): error TS2322: Type '{ ref: MutableRefObject<any>; url: string; playing: boolean; volume: number; width: string; height: string; progressInterval: number; onReady: () => void; onStart: () => void; onBuffer: () => void; ... 4 more ...; onError: (e: any, data?: any) => void; }' is not assignable to type 'IntrinsicAttributes & Omit<ReactPlayerProps, "ref"> & RefAttributes<HTMLVideoElement>'.
+  Property 'url' does not exist on type 'IntrinsicAttributes & Omit<ReactPlayerProps, "ref"> & RefAttributes<HTMLVideoElement>'.

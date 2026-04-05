@@ -1,33 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AxiosError } from "axios";
 import { mediaApi, playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
 import type { MediaItem, MediaType } from "@/types/media";
-import { pickBestAudioSource, pickPlayableVideoSources } from "@/lib/playback";
-import { buildMediaProxyUrl } from "@/lib/proxy-stream-url";
 import { SearchBox } from "@/components/media/search-box";
 import { MediaCard } from "@/components/media/media-card";
 import { useMediaSearch } from "@/hooks/use-media-search";
 import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 
 type Props = { type: MediaType };
-type ApiErrorResponse = { message?: string };
-
-const toApiMessage = (error: unknown, fallback: string): string => {
-  const axiosError = error as AxiosError<ApiErrorResponse>;
-  return axiosError?.response?.data?.message ?? fallback;
-};
 
 export const MediaPage = ({ type }: Props) => {
   const [query, setQuery] = useState("");
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
-  const requestTokenRef = useRef(0);
-  const playRequestControllerRef = useRef<AbortController | null>(null);
 
   const playAudio = usePlayerStore((state) => state.playAudio);
   const playVideo = usePlayerStore((state) => state.playVideo);
-  const setPlaying = usePlayerStore((state) => state.setPlaying);
 
   const search = useMediaSearch(query, type);
 
@@ -46,18 +34,6 @@ export const MediaPage = ({ type }: Props) => {
     return all;
   }, [search.data?.pages]);
 
-  // Cleanup in-flight request on unmount
-  useEffect(
-    () => () => { playRequestControllerRef.current?.abort(); },
-    []
-  );
-
-  // Prefetch stream info for the first visible items
-  useEffect(() => {
-    const topIds = items.slice(0, 6).map((item) => item.id);
-    mediaApi.prefetchStreams(topIds);
-  }, [items]);
-
   // Stable infinite scroll trigger
   const triggerNextPage = useCallback(() => {
     if (search.hasNextPage && !search.isFetchingNextPage) {
@@ -68,7 +44,9 @@ export const MediaPage = ({ type }: Props) => {
   const loaderRef = useInfiniteTrigger(triggerNextPage);
 
   // ------------------------------------------------------------------
-  // Play handler
+  // Play handler — simplified: for music, play immediately via YouTube
+  // IFrame (ReactPlayer). For video, fetch stream info for related videos
+  // but still use YouTube URL for the actual player.
   // ------------------------------------------------------------------
   const onPlay = async (item: MediaItem) => {
     if (loadingItemId === item.id) return;
@@ -76,75 +54,32 @@ export const MediaPage = ({ type }: Props) => {
     setActionMessage(null);
     setLoadingItemId(item.id);
 
-    playRequestControllerRef.current?.abort();
-    const controller = new AbortController();
-    playRequestControllerRef.current = controller;
-
-    const token = ++requestTokenRef.current;
-
     try {
-      let stream = await mediaApi.streams(item.id, { signal: controller.signal });
-
-      const hasMusicSource = Boolean(pickBestAudioSource(stream)?.url);
-      const hasVideoSource =
-        pickPlayableVideoSources(
-          stream.video.map((e) => ({ url: e.url, quality: e.quality, format: e.format }))
-        ).length > 0;
-
-      const shouldRefresh =
-        Boolean(stream.unavailableReason) ||
-        (item.type === "music" && !hasMusicSource) ||
-        (item.type === "video" && !hasVideoSource);
-
-      if (shouldRefresh && !controller.signal.aborted) {
-        stream = await mediaApi.streams(item.id, { forceRefresh: true, signal: controller.signal });
-      }
-
-      if (token !== requestTokenRef.current || controller.signal.aborted) return;
-
-      if (stream.unavailableReason) {
-        setActionMessage(stream.unavailableReason);
-        return;
-      }
-
       if (item.type === "music") {
-        const bestAudio = pickBestAudioSource(stream);
-        if (!bestAudio?.url) {
-          setActionMessage("Audio stream unavailable for this item.");
-          return;
-        }
+        // ── Music: play directly via YouTube IFrame — no proxy needed ──────
         playAudio(
           item,
-          { url: buildMediaProxyUrl(item.id, "audio"), mimeType: bestAudio.mimeType },
+          { url: `https://www.youtube.com/watch?v=${item.id}`, mimeType: "audio/mpeg" },
           items
         );
-        return;
+      } else {
+        // ── Video: fetch related videos in background, play immediately ─────
+        // Start playing right away so the user doesn't wait
+        playVideo(item, [], []);
+
+        // Then fetch related in background (non-blocking)
+        mediaApi.streams(item.id).then((stream) => {
+          const related = stream.related ?? [];
+          // Update video session with related videos
+          playVideo(item, [], related);
+        }).catch(() => {
+          // Related fetch failed — video still plays, just no related list
+        });
       }
-
-      // Video
-      setPlaying(false);
-      const rawSources = pickPlayableVideoSources(
-        stream.video.map((e) => ({ url: e.url, quality: e.quality, format: e.format }))
-      );
-
-      if (rawSources.length === 0) {
-        setActionMessage("Video stream unavailable for this item.");
-        return;
-      }
-
-      const proxiedSources = rawSources.map((e) => ({
-        url: buildMediaProxyUrl(item.id, "video", e.quality),
-        quality: e.quality,
-        format: e.format
-      }));
-
-      playVideo(item, proxiedSources, stream.related ?? []);
-    } catch (error) {
-      if (token !== requestTokenRef.current) return;
-      if (mediaApi.isCanceledError(error)) return;
-      setActionMessage(toApiMessage(error, "Playback failed. Please try another item."));
+    } catch {
+      setActionMessage("Playback failed. Please try another item.");
     } finally {
-      if (token === requestTokenRef.current) setLoadingItemId(null);
+      setLoadingItemId(null);
     }
   };
 
@@ -168,9 +103,9 @@ export const MediaPage = ({ type }: Props) => {
         artwork: item.thumbnail,
         duration: item.duration
       });
-      setActionMessage("Added to Favorites.");
-    } catch (error) {
-      setActionMessage(toApiMessage(error, "Could not add this item to playlist."));
+      setActionMessage("Added to Favorites ✓");
+    } catch {
+      setActionMessage("Could not add this item to playlist.");
     }
   };
 

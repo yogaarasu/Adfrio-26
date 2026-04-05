@@ -3,13 +3,13 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Unified search + stream-source resolver.
  *
- * Priority order
- *   Search:  Innertube → play-dl → Piped
- *   Stream:  Innertube → ytdl-core → play-dl → Piped direct URL
+ * Stream priority order (most → least reliable in production):
+ *   1. play-dl stream() — pipes directly, works with cookie auth on Render
+ *   2. ytdl-core downloadFromInfo — Node.js stream, no redirects
+ *   3. Piped direct URL — last resort, may need CORS proxy
  *
- * Innertube (youtubei.js) is the most resilient because it uses the internal
- * YouTube API used by the official web client, so it is not subject to the
- * same bot-detection that breaks play-dl and ytdl-core in production.
+ * Search priority order:
+ *   Innertube → play-dl → Piped
  */
 
 import play from "play-dl";
@@ -43,13 +43,23 @@ let playDlInitialized = false;
 export const initPlayDl = async (): Promise<void> => {
   if (playDlInitialized) return;
 
-  if (env.YOUTUBE_COOKIE?.trim()) {
+  const cookie = env.YOUTUBE_COOKIE?.trim();
+  if (cookie) {
     try {
-      await play.setToken({ youtube: { cookie: env.YOUTUBE_COOKIE.trim() } });
-      console.log("[play-dl] YouTube cookie set successfully");
+      // play-dl v4+ uses setToken; some builds export it differently
+      const playAny = play as any;
+      const setter = playAny.setToken ?? playAny.default?.setToken;
+      if (typeof setter === "function") {
+        await setter({ youtube: { cookie } });
+        console.log("[play-dl] YouTube cookie accepted ✓");
+      } else {
+        console.warn("[play-dl] setToken not found — running without cookie");
+      }
     } catch (err: any) {
-      console.warn("[play-dl] Failed to set YouTube cookie:", err?.message);
+      console.warn("[play-dl] setToken threw:", err?.message);
     }
+  } else {
+    console.warn("[play-dl] No YOUTUBE_COOKIE set — bot-detection risk in production");
   }
 
   playDlInitialized = true;
@@ -150,16 +160,23 @@ export const searchYoutube = async (
   return { items: shuffled, nextPageToken };
 };
 
-// ─── Stream Source Resolution ─────────────────────────────────────────────────
+// ─── Stream Source Resolution ─────────────────────────────────────────────────────
 
 /**
- * Returns either a Node.js Readable stream or a direct URL string.
- * The controller (media.controller.ts) decides how to use it.
+ * Returns a Node.js Readable stream (preferred — piped directly to the browser
+ * response with no redirect/CORS issues) or a direct URL as last resort.
+ *
+ * Priority order (most → least reliable):
+ *   1. Innertube client.download() — v17 native API; handles deciphering internally,
+ *      works without cookies for most videos, returns a proper Node.js ReadableStream.
+ *   2. play-dl stream() — fast when YOUTUBE_COOKIE is set in env.
+ *   3. ytdl-core downloadFromInfo — heavier init but reliable fallback.
+ *   4. Piped direct URL — absolute last resort; controller proxies via stream-proxy.ts.
  */
 export const getStreamSource = async (
   videoId: string,
   type: "audio" | "video"
-): Promise<{ stream: any } | { url: string }> => {
+): Promise<{ stream: any; mimeType?: string } | { url: string }> => {
   await initPlayDl();
 
   const videoUrl = videoId.startsWith("http")
@@ -170,20 +187,51 @@ export const getStreamSource = async (
     ? (new URL(videoId).searchParams.get("v") ?? videoId.split("/").pop() ?? videoId)
     : videoId;
 
-  // ── 1. Innertube — High priority streaming ───────────────────────────
+  // ── 1. Innertube client.download() (primary — most reliable) ──────────────────
+  // youtubei.js handles all signature deciphering internally and returns a
+  // proper ReadableStream. No cookies required for most public videos.
   try {
-    const streamData = await innertubeGetStreams(cleanId);
-    const candidates = type === "audio" ? streamData.audioStreams : streamData.videoStreams;
-    const best = candidates[0];
-    if (best?.url) {
-      console.log(`[stream] Innertube OK for ${cleanId} (${type})`);
-      return { url: best.url };
-    }
+    const client = await getInnertube();
+    const stream = await client.download(cleanId, {
+      type: type === "audio" ? "audio" : "video+audio",
+      quality: type === "audio" ? "best" : "360p",
+      client: "WEB",
+    });
+
+    // youtubei.js returns a web ReadableStream — convert it to Node.js Readable
+    const { Readable } = await import("stream");
+    const nodeStream = Readable.fromWeb(stream as any);
+
+    const mimeType = type === "audio" ? "audio/webm; codecs=opus" : "video/mp4";
+    console.log(`[stream] ✓ Innertube download OK for ${cleanId} (${type})`);
+    return { stream: nodeStream, mimeType };
   } catch (innertubeErr: any) {
-    console.warn(`[stream] Innertube failed for ${cleanId}:`, innertubeErr?.message);
+    console.error(
+      `[stream] ❌ Innertube download FAILED for ${cleanId} (${type}):`,
+      innertubeErr?.message ?? innertubeErr
+    );
   }
 
-  // ── 2. ytdl-core ─────────────────────────────────────────────────────────
+  // ── 2. play-dl (secondary) ────────────────────────────────────────────────────────
+  // play-dl.stream() returns a PlayStream; we extract the inner Node.js Readable.
+  try {
+    const playdlResult = await play.stream(videoUrl, {
+      quality: type === "audio" ? 3 : 2,
+    } as Parameters<typeof play.stream>[1]);
+
+    const readable = (playdlResult as any).stream ?? playdlResult;
+    const mimeType: string = type === "audio" ? "audio/mpeg" : "video/mp4";
+
+    console.log(`[stream] ✓ play-dl OK for ${cleanId} (${type})`);
+    return { stream: readable, mimeType };
+  } catch (playDlErr: any) {
+    console.error(
+      `[stream] ❌ play-dl FAILED for ${cleanId} (${type}):`,
+      playDlErr?.message ?? playDlErr
+    );
+  }
+
+  // ── 3. ytdl-core (tertiary) ───────────────────────────────────────────────────────
   try {
     const ytdlInfo = await ytdl.getInfo(videoUrl);
     const stream = ytdl.downloadFromInfo(ytdlInfo, {
@@ -191,37 +239,40 @@ export const getStreamSource = async (
       quality: type === "audio" ? "highestaudio" : "highestvideo",
       highWaterMark: 1 << 25, // 32 MB
     });
-    console.log(`[stream] ytdl OK for ${cleanId} (${type})`);
-    return { stream };
+    console.log(`[stream] ✓ ytdl-core OK for ${cleanId} (${type})`);
+    return { stream, mimeType: type === "audio" ? "audio/mpeg" : "video/mp4" };
   } catch (ytdlErr: any) {
-    console.warn(`[stream] ytdl failed for ${cleanId}:`, ytdlErr?.message);
+    console.error(
+      `[stream] ❌ ytdl-core FAILED for ${cleanId} (${type}):`,
+      ytdlErr?.message ?? ytdlErr
+    );
   }
 
-  // ── 3. play-dl ───────────────────────────────────────────────────────────
+  // ── 4. Piped direct URL (absolute last resort) ─────────────────────────────────
+  console.warn(`[stream] All Node.js extractors failed for ${cleanId} — falling back to Piped URL`);
   try {
-    const stream = await play.stream(videoUrl, {
-      quality: type === "audio" ? 3 : 2,
-      seek: 0,
-    } as Parameters<typeof play.stream>[1]);
-    console.log(`[stream] play-dl OK for ${cleanId} (${type})`);
-    return stream;
-  } catch (playDlErr: any) {
-    console.warn(`[stream] play-dl failed for ${cleanId}:`, playDlErr?.message);
+    const rawStreams = await getStreamData(cleanId);
+    const normalized = normalizeStreams(rawStreams);
+    const candidateUrl =
+      type === "audio" ? normalized.audio[0]?.url : normalized.video[0]?.url;
+
+    if (!candidateUrl) {
+      throw new Error(`Piped returned no playable ${type} URL for ${cleanId}`);
+    }
+
+    console.log(`[stream] Piped URL fallback for ${cleanId}: ${candidateUrl.slice(0, 60)}...`);
+    return { url: candidateUrl };
+  } catch (pipedErr: any) {
+    console.error(
+      `[stream] ❌ Piped FAILED for ${cleanId}:`,
+      pipedErr?.message ?? pipedErr
+    );
   }
 
-  // ── 4. Piped direct URL (last resort) ────────────────────────────────────
-  const rawStreams = await getStreamData(cleanId);
-  const normalized = normalizeStreams(rawStreams);
-
-  const candidateUrl =
-    type === "audio" ? normalized.audio[0]?.url : normalized.video[0]?.url;
-
-  if (!candidateUrl) {
-    throw new Error(`No playable stream found for ${cleanId} on any source`);
-  }
-
-  console.log(`[stream] Piped redirect for ${cleanId}`);
-  return { url: candidateUrl };
+  throw new Error(
+    `[stream] All extractors exhausted for ${cleanId} (${type}). ` +
+    `Ensure YOUTUBE_COOKIE is set and valid in the server environment.`
+  );
 };
 
 // ─── Video Info (for streams endpoint) ───────────────────────────────────────
@@ -247,17 +298,16 @@ export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
   try {
     const data = await innertubeGetStreams(cleanId);
 
-    // Resolve related items (basic info)
-    const related: MediaItem[] = data.relatedIds
-      .map((id) => ({
-        id,
-        title: "Related Video",
-        creator: "YouTube",
-        thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
-        duration: null,
-        type: "video" as const,
-        youtubeUrl: `https://www.youtube.com/watch?v=${id}`,
-      }));
+    // Use the real related metadata parsed from watch_next_feed
+    const related: MediaItem[] = (data.related ?? []).map((r) => ({
+      id: r.id,
+      title: r.title,
+      creator: r.creator,
+      thumbnail: r.thumbnail,
+      duration: r.duration,
+      type: "video" as const,
+      youtubeUrl: `https://www.youtube.com/watch?v=${r.id}`,
+    }));
 
     return {
       title: data.title,

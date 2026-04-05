@@ -97,6 +97,7 @@ export type InnertubeStreamResult = {
   uploader: string;
   audioStreams: Array<{ url: string; mimeType: string; bitrate: number }>;
   videoStreams: Array<{ url: string; quality: string; mimeType: string }>;
+  related: Array<{ id: string; title: string; creator: string; thumbnail: string; duration: number | null }>;
   relatedIds: string[];
   hls: string | null;
   dash: string | null;
@@ -198,12 +199,53 @@ export const innertubeGetStreams = async (
   const hls: string | null = info.streaming_data?.hls_manifest_url ?? null;
   const dash: string | null = info.streaming_data?.dash_manifest_url ?? null;
 
-  // Related videos from watch-next feed
+  // Related videos from watch-next feed — parse real metadata
   const relatedFeed: any[] = info.watch_next_feed ?? [];
-  const relatedIds: string[] = relatedFeed
-    .map((item: any) => item?.id ?? item?.video_id ?? "")
-    .filter(Boolean)
-    .slice(0, 10);
+
+  type RelatedItem = {
+    id: string;
+    title: string;
+    creator: string;
+    thumbnail: string;
+    duration: number | null;
+  };
+
+  const related: RelatedItem[] = [];
+
+  for (const item of relatedFeed) {
+    if (related.length >= 12) break;
+
+    const id: string = item?.id ?? item?.video_id ?? "";
+    if (!id) continue;
+
+    const titleObj: any = item?.title;
+    const title: string =
+      typeof titleObj === "string"
+        ? titleObj
+        : (titleObj?.text ?? titleObj?.runs?.[0]?.text ?? "Related Video");
+
+    const authorObj: any = item?.short_byline_text ?? item?.author ?? item?.channel;
+    const creator: string =
+      typeof authorObj === "string"
+        ? authorObj
+        : (authorObj?.text ?? authorObj?.runs?.[0]?.text ?? authorObj?.name ?? "YouTube");
+
+    const thumbSources: Array<{ url: string }> =
+      (item?.best_thumbnail?.sources ?? item?.thumbnails ?? []) as Array<{ url: string }>;
+    const thumbnail: string =
+      thumbSources[thumbSources.length - 1]?.url ??
+      `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+
+    const durationSec: number | null =
+      typeof item?.duration?.seconds === "number"
+        ? item.duration.seconds
+        : (item?.duration_secs as number | null | undefined) ?? null;
+
+    related.push({ id, title, creator, thumbnail, duration: durationSec });
+  }
+
+  // Keep old relatedIds for backward compat
+  const relatedIds: string[] = related.map((r) => r.id);
 
   return {
     title,
@@ -213,6 +255,7 @@ export const innertubeGetStreams = async (
     audioStreams: dedupedAudio,
     videoStreams: [...seenQuality.values()],
     relatedIds,
+    related,
     hls,
     dash,
   };

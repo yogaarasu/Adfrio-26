@@ -1,4 +1,4 @@
-﻿import { create } from "zustand";
+import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { MediaItem } from "@/types/media";
 
@@ -31,6 +31,7 @@ type PlayerState = {
   duration: number;
   volume: number;
   sleepUntil: number | null;
+  audioError: string | null;
   setQueue: (queue: MediaItem[]) => void;
   playAudio: (media: MediaItem, source: AudioSource, queue?: MediaItem[]) => void;
   playVideo: (media: MediaItem, sources: VideoSource[], related?: MediaItem[]) => void;
@@ -42,11 +43,18 @@ type PlayerState = {
   setSleepTimer: (minutes: number | null) => void;
   seekBy: (seconds: number, element: HTMLMediaElement | null) => void;
   clearVideo: () => void;
+  setAudioError: (error: string | null) => void;
 };
 
 let sleepTimeout: ReturnType<typeof setTimeout> | null = null;
 
-const emptyVideoSession: VideoSession = { active: false, title: "", poster: "", sources: [], related: [] };
+const emptyVideoSession: VideoSession = {
+  active: false,
+  title: "",
+  poster: "",
+  sources: [],
+  related: [],
+};
 
 export const usePlayerStore = create<PlayerState>()(
   persist(
@@ -60,16 +68,21 @@ export const usePlayerStore = create<PlayerState>()(
       duration: 0,
       volume: 1,
       sleepUntil: null,
+      audioError: null,
+
       setQueue: (queue) => set({ queue }),
+
       playAudio: (media, source, queue) => {
         set({
           current: media,
           audio: source,
           video: emptyVideoSession,
           queue: queue ?? get().queue,
-          playing: true
+          playing: true,
+          audioError: null,
         });
       },
+
       playVideo: (media, sources, related = []) => {
         set({
           current: media,
@@ -79,19 +92,23 @@ export const usePlayerStore = create<PlayerState>()(
             title: media.title,
             poster: media.thumbnail,
             sources,
-            related
-          }
+            related,
+          },
         });
       },
+
       pauseAll: () => set({ playing: false }),
+
       resumeAudio: () => {
         if (get().audio) {
           set({ playing: true, video: emptyVideoSession });
         }
       },
+
       setPlaying: (playing) => set({ playing }),
       setProgress: (currentTime, duration) => set({ currentTime, duration }),
       setVolume: (volume) => set({ volume }),
+
       setSleepTimer: (minutes) => {
         if (sleepTimeout) {
           clearTimeout(sleepTimeout);
@@ -110,19 +127,37 @@ export const usePlayerStore = create<PlayerState>()(
           set({ playing: false, sleepUntil: null });
         }, minutes * 60 * 1000);
       },
+
       seekBy: (seconds, element) => {
         if (!element) return;
-        element.currentTime = Math.max(0, Math.min(element.duration || Number.MAX_SAFE_INTEGER, element.currentTime + seconds));
+        element.currentTime = Math.max(
+          0,
+          Math.min(
+            element.duration || Number.MAX_SAFE_INTEGER,
+            element.currentTime + seconds
+          )
+        );
       },
-      clearVideo: () => set({ video: emptyVideoSession, playing: Boolean(get().audio) })
+
+      // Stop video overlay; resume audio player if a track is loaded
+      clearVideo: () =>
+        set({
+          video: emptyVideoSession,
+          playing: Boolean(get().audio),
+        }),
+
+      setAudioError: (error) => set({ audioError: error }),
     }),
     {
       name: "adfrio-player",
+      // Persist audio source + current so playback survives cross-page navigation
       partialize: (state) => ({
         queue: state.queue,
         current: state.current,
-        volume: state.volume
-      })
+        audio: state.audio, // <-- was missing before; this is the key fix
+        volume: state.volume,
+        // Do NOT persist: playing (force replay after refresh), video (re-fetch on demand)
+      }),
     }
   )
 );
