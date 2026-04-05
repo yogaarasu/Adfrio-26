@@ -73,7 +73,7 @@ export default defineConfig(({ mode }) => ({
     // Proxy API in dev so CORS is never an issue during local development
     proxy: {
       "/api": {
-        target: "http://localhost:8081",
+        target: "http://localhost:8080",
         changeOrigin: true,
         secure: false
       }
