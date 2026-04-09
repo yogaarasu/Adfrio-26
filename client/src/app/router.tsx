@@ -4,6 +4,7 @@ import { HomePage } from "@/pages/home-page";
 import { SearchPage } from "@/pages/search-page";
 import { LibraryPage } from "@/pages/library-page";
 import { ProfilePage } from "@/pages/profile-page";
+import { NowPlayingPage } from "@/pages/now-playing-page";
 
 export const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
       { path: "search", element: <SearchPage /> },
       { path: "library", element: <LibraryPage /> },
       { path: "profile", element: <ProfilePage /> },
+      { path: "now-playing", element: <NowPlayingPage /> },
       { path: "music", element: <Navigate to="/home" replace /> },
       { path: "videos", element: <Navigate to="/home" replace /> },
       { path: "account", element: <Navigate to="/profile" replace /> },

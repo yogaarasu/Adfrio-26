@@ -82,6 +82,14 @@ export type MeResponse = {
   };
 };
 
+export type SearchApiResponse = {
+  items: MediaItem[];
+  nextPageToken: string | null;
+  suggestions?: string[];
+  correctedQuery?: string | null;
+  appliedQuery?: string | null;
+};
+
 export const authApi = {
   requestOtp: (email: string, name: string) => api.post("/auth/otp/request", { email, name }),
   verifyOtp: (email: string, otp: string) => api.post("/auth/otp/verify", { email, otp }),
@@ -96,8 +104,31 @@ type StreamOptions = {
 };
 
 export const mediaApi = {
-  search: async (q: string, type: MediaType, pageToken?: string): Promise<{ items: MediaItem[]; nextPageToken: string | null }> => {
-    const { data } = await api.get("/media/search", { params: { q, type, pageToken } });
+  search: async (
+    q: string,
+    type: MediaType,
+    pageToken?: string,
+    realtimeId?: string
+  ): Promise<SearchApiResponse> => {
+    const { data } = await api.get("/media/search", { params: { q, type, pageToken, realtimeId } });
+    return data;
+  },
+  homeFeed: async (params: {
+    mode: MediaType;
+    language: string;
+    pageToken?: string;
+    sessionSeed?: number;
+    realtimeId?: string;
+  }): Promise<{ items: MediaItem[]; nextPageToken: string | null }> => {
+    const { data } = await api.get("/media/home", {
+      params: {
+        mode: params.mode,
+        language: params.language,
+        pageToken: params.pageToken,
+        sessionSeed: params.sessionSeed,
+        realtimeId: params.realtimeId,
+      },
+    });
     return data;
   },
   streams: async (id: string, options?: StreamOptions): Promise<StreamResponse> => {

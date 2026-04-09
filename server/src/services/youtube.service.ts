@@ -153,11 +153,10 @@ export const searchYoutube = async (
     }
   }
 
-  // De-duplicate + shuffle for discovery variety
+  // De-duplicate while preserving source order (no random shuffling).
   const unique = Array.from(new Map(results.map((item) => [item.id, item])).values());
-  const shuffled = isDiscovery ? unique.sort(() => Math.random() - 0.5) : unique;
 
-  return { items: shuffled, nextPageToken };
+  return { items: unique, nextPageToken };
 };
 
 // ─── Stream Source Resolution ─────────────────────────────────────────────────────

@@ -5,32 +5,14 @@ import { usePlayerStore } from "@/store/player-store";
 import { usePreferencesStore } from "@/store/preferences-store";
 import { MediaCard } from "@/components/media/media-card";
 import { useScrollThreshold } from "@/hooks/use-scroll-threshold";
+import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
 import { filterStrictSongs, dedupeMediaItems } from "@/lib/media-filters";
-import { buildLanguageQuery } from "@/lib/media-query";
 import type { MediaItem } from "@/types/media";
 
 type SearchResponse = {
   items: MediaItem[];
   nextPageToken: string | null;
 };
-
-const MUSIC_DISCOVERY_SEEDS = [
-  "trending hit songs",
-  "all time favorite songs",
-  "top chart songs",
-  "latest songs mix",
-  "popular songs tamil",
-  "viral songs music"
-];
-
-const VIDEO_DISCOVERY_SEEDS = [
-  "viral now",
-  "trending now",
-  "must watch",
-  "popular clips",
-  "latest uploads",
-  "top videos"
-];
 
 export const HomePage = () => {
   const mode = usePreferencesStore((state) => state.mode);
@@ -40,27 +22,45 @@ export const HomePage = () => {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(20);
+  const [realtimeProgress, setRealtimeProgress] = useState<string | null>(null);
   const seenSongIdsRef = useRef<Set<string>>(new Set());
+  const { connectionId, lastMessage } = useRealtimeConnection();
 
   const playAudio = usePlayerStore((state) => state.playAudio);
   const playVideo = usePlayerStore((state) => state.playVideo);
   const updateVideoSession = usePlayerStore((state) => state.updateVideoSession);
+  const current = usePlayerStore((state) => state.current);
+  const playing = usePlayerStore((state) => state.playing);
 
-  const discoverySeed = useMemo(() => {
-    const list = mode === "music" ? MUSIC_DISCOVERY_SEEDS : VIDEO_DISCOVERY_SEEDS;
-    return list[refreshSeed % list.length];
-  }, [mode, refreshSeed]);
+  useEffect(() => {
+    setRealtimeProgress(null);
+  }, [language, mode]);
+
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== "home-feed:progress") return;
+    if (lastMessage.mode !== mode) return;
+    const percentValue = typeof lastMessage.percent === "number" ? lastMessage.percent : null;
+    if (percentValue !== null && percentValue >= 100) {
+      setRealtimeProgress(null);
+      return;
+    }
+    const percent = percentValue !== null ? `${percentValue}%` : "Live";
+    const text = typeof lastMessage.message === "string" ? lastMessage.message : "Updating feed...";
+    setRealtimeProgress(`${percent} - ${text}`);
+  }, [lastMessage, mode]);
 
   const homeFeed = useInfiniteQuery({
-    queryKey: ["home-feed", mode, language, refreshSeed, discoverySeed],
+    queryKey: ["home-feed", mode, language, refreshSeed],
     initialPageParam: "",
     queryFn: ({ pageParam }) =>
-      mediaApi.search(
-        buildLanguageQuery(discoverySeed, language, mode),
+      mediaApi.homeFeed({
         mode,
-        (pageParam as string) || undefined
-      ),
-    getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined
+        language,
+        pageToken: (pageParam as string) || undefined,
+        sessionSeed: refreshSeed,
+        realtimeId: connectionId ?? undefined,
+      }),
+    getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined,
   });
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = homeFeed;
 
@@ -70,9 +70,9 @@ export const HomePage = () => {
       const strictSongs = filterStrictSongs(merged);
       const unseenSongs = strictSongs.filter((item) => !seenSongIdsRef.current.has(item.id));
       const songsPool = unseenSongs.length >= 30 ? unseenSongs : strictSongs;
-      return songsPool.slice(0, 160);
+      return songsPool;
     }
-    return merged.slice(0, 160);
+    return merged;
   }, [homeFeed.data?.pages, mode]);
 
   useEffect(() => {
@@ -89,7 +89,7 @@ export const HomePage = () => {
 
   useEffect(() => {
     setVisibleCount(20);
-  }, [mode, language, refreshSeed, discoverySeed]);
+  }, [mode, language, refreshSeed]);
 
   useEffect(() => {
     if (visibleCount <= feedItems.length) return;
@@ -149,7 +149,7 @@ export const HomePage = () => {
           title: item.title,
           creator: item.creator,
           artwork: item.thumbnail,
-          duration: item.duration
+          duration: item.duration,
         });
         setActionMessage(`${item.type === "music" ? "Song" : "Video"} added to Favorites`);
       } catch {
@@ -183,7 +183,7 @@ export const HomePage = () => {
               description: stream.description,
               uploader: stream.uploader,
               uploaderAvatarUrl: stream.uploaderAvatarUrl ?? null,
-              likes: stream.likes ?? null
+              likes: stream.likes ?? null,
             });
           })
           .catch(() => undefined);
@@ -207,11 +207,18 @@ export const HomePage = () => {
             ? `Fresh ${language} songs only`
             : `Fresh ${language} trending videos`}
         </p>
+        {realtimeProgress ? <p className="text-xs text-white/45">Live: {realtimeProgress}</p> : null}
       </header>
 
       {actionMessage ? (
         <p className="rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-sm text-white/80">
           {actionMessage}
+        </p>
+      ) : null}
+
+      {homeFeed.isError ? (
+        <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          Could not refresh home feed right now.
         </p>
       ) : null}
 
@@ -227,6 +234,8 @@ export const HomePage = () => {
               onPlay={(entry) => playMedia(entry, visibleItems)}
               onAdd={addToFavorites}
               isLoading={loadingItemId === item.id}
+              isCurrentTrack={current?.id === item.id}
+              isCurrentPlaying={current?.id === item.id && playing}
             />
           ))}
         </div>

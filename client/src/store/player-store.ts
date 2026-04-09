@@ -169,7 +169,30 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       setPlaying: (playing) => set({ playing }),
-      setProgress: (currentTime, duration) => set({ currentTime, duration }),
+      setProgress: (nextTime, nextDuration) =>
+        set((state) => {
+          const fallbackDuration = Number(state.current?.duration ?? 0);
+          const previousDuration = Number(state.duration);
+          const resolvedDuration =
+            Number.isFinite(nextDuration) && nextDuration > 0
+              ? nextDuration
+              : previousDuration > 0
+                ? previousDuration
+                : fallbackDuration > 0
+                  ? fallbackDuration
+                  : 0;
+
+          const rawTime = Number.isFinite(nextTime) ? nextTime : state.currentTime;
+          const boundedTime =
+            resolvedDuration > 0
+              ? Math.max(0, Math.min(rawTime, resolvedDuration))
+              : Math.max(0, rawTime);
+
+          return {
+            currentTime: boundedTime,
+            duration: resolvedDuration,
+          };
+        }),
       setVolume: (volume) => set({ volume }),
 
       setSleepTimer: (minutes) => {

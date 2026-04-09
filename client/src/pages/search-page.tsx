@@ -8,6 +8,7 @@ import { SearchBox } from "@/components/media/search-box";
 import { MediaCard } from "@/components/media/media-card";
 import { Card } from "@/components/ui/card";
 import { useScrollThreshold } from "@/hooks/use-scroll-threshold";
+import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
 import { buildLanguageQuery } from "@/lib/media-query";
 import { dedupeMediaItems, filterStrictSongs } from "@/lib/media-filters";
 import type { MediaItem } from "@/types/media";
@@ -15,6 +16,8 @@ import type { MediaItem } from "@/types/media";
 type SearchResponse = {
   items: MediaItem[];
   nextPageToken: string | null;
+  suggestions?: string[];
+  correctedQuery?: string | null;
 };
 
 export const SearchPage = () => {
@@ -24,10 +27,14 @@ export const SearchPage = () => {
   const [query, setQuery] = useState("");
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [realtimeProgress, setRealtimeProgress] = useState<string | null>(null);
 
   const playAudio = usePlayerStore((state) => state.playAudio);
   const playVideo = usePlayerStore((state) => state.playVideo);
   const updateVideoSession = usePlayerStore((state) => state.updateVideoSession);
+  const current = usePlayerStore((state) => state.current);
+  const playing = usePlayerStore((state) => state.playing);
+  const { connectionId, lastMessage } = useRealtimeConnection();
 
   const search = useInfiniteQuery({
     queryKey: ["search-mode", mode, language, query],
@@ -37,7 +44,8 @@ export const SearchPage = () => {
       mediaApi.search(
         buildLanguageQuery(query, language, mode),
         mode,
-        (pageParam as string) || undefined
+        (pageParam as string) || undefined,
+        connectionId ?? undefined
       ),
     getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined
   });
@@ -46,6 +54,33 @@ export const SearchPage = () => {
     const merged = dedupeMediaItems((search.data?.pages ?? []).flatMap((page) => page.items));
     return mode === "music" ? filterStrictSongs(merged) : merged;
   }, [mode, search.data?.pages]);
+
+  const suggestions = useMemo(() => {
+    const all = (search.data?.pages ?? []).flatMap((page) => page.suggestions ?? []);
+    return [...new Set(all)].filter(Boolean).slice(0, 5);
+  }, [search.data?.pages]);
+
+  const correctedQuery = useMemo(
+    () => search.data?.pages?.[0]?.correctedQuery ?? null,
+    [search.data?.pages]
+  );
+
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== "search:progress") return;
+    if (lastMessage.mode !== mode) return;
+    const percentValue = typeof lastMessage.percent === "number" ? lastMessage.percent : null;
+    if (percentValue !== null && percentValue >= 100) {
+      setRealtimeProgress(null);
+      return;
+    }
+    const percent = percentValue !== null ? `${percentValue}%` : "Live";
+    const text = typeof lastMessage.message === "string" ? lastMessage.message : "Searching...";
+    setRealtimeProgress(`${percent} - ${text}`);
+  }, [lastMessage, mode]);
+
+  useEffect(() => {
+    setRealtimeProgress(null);
+  }, [mode, language, query]);
 
   useEffect(() => {
     if (mode !== "music" || items.length === 0) return;
@@ -149,6 +184,31 @@ export const SearchPage = () => {
         placeholder={mode === "music" ? "Search songs..." : "Search videos..."}
       />
 
+      {correctedQuery ? (
+        <p className="text-xs text-white/60">
+          Showing improved results for <span className="font-semibold text-white">{correctedQuery}</span>
+        </p>
+      ) : null}
+
+      {suggestions.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {suggestions.map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              onClick={() => setQuery(entry)}
+              className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs text-white/85 transition hover:bg-white/10"
+            >
+              {entry}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {realtimeProgress && query.trim().length > 0 ? (
+        <p className="text-xs text-white/45">Live: {realtimeProgress}</p>
+      ) : null}
+
       {statusMessage ? (
         <p className="rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-sm text-white/80">
           {statusMessage}
@@ -172,6 +232,8 @@ export const SearchPage = () => {
               onPlay={(entry) => playMedia(entry, items)}
               onAdd={addToFavorites}
               isLoading={loadingItemId === item.id}
+              isCurrentTrack={current?.id === item.id}
+              isCurrentPlaying={current?.id === item.id && playing}
             />
           ))}
         </div>

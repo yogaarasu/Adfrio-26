@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { sendError } from "../utils/http.js";
+import { sendRealtimeEvent } from "../services/realtime.js";
 import {
   searchYoutube,
   getStreamSource,
@@ -16,6 +17,15 @@ const searchSchema = z.object({
   q: z.string().optional(),
   type: z.enum(["music", "video"]).default("music"),
   pageToken: z.string().optional(),
+  realtimeId: z.string().optional(),
+});
+
+const homeFeedSchema = z.object({
+  mode: z.enum(["music", "video"]).default("music"),
+  language: z.string().optional(),
+  pageToken: z.string().optional(),
+  sessionSeed: z.string().optional(),
+  realtimeId: z.string().optional(),
 });
 
 const proxyByIdSchema = z.object({
@@ -30,6 +40,158 @@ const proxyByIdQuerySchema = z.object({
 const streamSchema = z.object({
   id: z.string().min(1),
 });
+
+const HOME_MUSIC_TEMPLATES = [
+  "{language} latest hit songs {year}",
+  "{language} trending songs now",
+  "new {language} songs this week",
+  "viral {language} songs",
+  "top {language} chart songs",
+  "{language} melody hits playlist",
+];
+
+const HOME_VIDEO_TEMPLATES = [
+  "youtube trending now {language}",
+  "latest viral {language} videos",
+  "hit trending videos {language} {year}",
+  "{language} popular clips now",
+  "youtube hottest {language} uploads",
+  "must watch {language} videos",
+];
+
+const MAX_HOME_PAGES = 240;
+const MAX_SEARCH_PAGES = 160;
+
+const SEARCH_MUSIC_VARIANTS = [
+  "{query}",
+  "{query} official audio",
+  "{query} lyrics",
+  "{query} full song",
+  "{query} live performance",
+  "{query} remix",
+  "{query} unplugged",
+  "{query} playlist mix",
+];
+
+const SEARCH_VIDEO_VARIANTS = [
+  "{query}",
+  "{query} latest",
+  "{query} highlights",
+  "{query} full video",
+  "{query} trending",
+  "{query} explained",
+  "{query} reaction",
+  "{query} compilation",
+];
+
+const SEARCH_FIXUPS: Record<string, string> = {
+  sond: "song",
+  soong: "song",
+  sonng: "song",
+  musci: "music",
+  musing: "music",
+  vedio: "video",
+  vedios: "videos",
+  vidoe: "video",
+  offical: "official",
+  ofical: "official",
+  lirics: "lyrics",
+  lyriccs: "lyrics",
+  relase: "release",
+  trnding: "trending",
+  yotube: "youtube",
+  yuotube: "youtube",
+};
+
+const parseIndexToken = (value: string | undefined): number => {
+  const parsed = Number.parseInt(value ?? "0", 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+};
+
+const normalizeLanguage = (value: string | undefined): string => {
+  if (!value) return "global";
+  const clean = value.trim().replace(/[^a-zA-Z ]+/g, "").replace(/\s+/g, " ");
+  return clean.length > 0 ? clean : "global";
+};
+
+const buildHomeQuery = (
+  mode: "music" | "video",
+  language: string,
+  pageIndex: number,
+  seed: number
+): string => {
+  const templates = mode === "music" ? HOME_MUSIC_TEMPLATES : HOME_VIDEO_TEMPLATES;
+  const year = new Date().getUTCFullYear().toString();
+  const offset = ((seed % templates.length) + templates.length) % templates.length;
+  const template = templates[(offset + pageIndex) % templates.length] ?? templates[0]!;
+
+  return template
+    .replace(/\{language\}/g, language)
+    .replace(/\{year\}/g, year)
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const dedupeById = <T extends { id: string }>(items: T[]): T[] => {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const item of items) {
+    if (!item.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    unique.push(item);
+  }
+  return unique;
+};
+
+const sanitizeSearchQuery = (value: string): string =>
+  value.trim().replace(/[^\p{L}\p{N}\s&'-]+/gu, " ").replace(/\s+/g, " ");
+
+const collapseRepeatingChars = (token: string): string =>
+  token.replace(/([A-Za-z])\1{2,}/g, "$1$1");
+
+const autoCorrectSearchQuery = (query: string): string => {
+  const cleaned = sanitizeSearchQuery(query);
+  if (!cleaned) return "";
+
+  return cleaned
+    .split(" ")
+    .map((rawToken) => {
+      const collapsed = collapseRepeatingChars(rawToken);
+      const lowered = collapsed.toLowerCase();
+      return SEARCH_FIXUPS[lowered] ?? collapsed;
+    })
+    .join(" ");
+};
+
+const buildSearchVariantQuery = (
+  mode: "music" | "video",
+  query: string,
+  pageIndex: number
+): string => {
+  const variants = mode === "music" ? SEARCH_MUSIC_VARIANTS : SEARCH_VIDEO_VARIANTS;
+  const template = variants[pageIndex % variants.length] ?? variants[0] ?? "{query}";
+  return template.replace(/\{query\}/g, query).replace(/\s+/g, " ").trim();
+};
+
+const buildSearchSuggestions = (
+  mode: "music" | "video",
+  rawQuery: string,
+  correctedQuery: string
+): string[] => {
+  const base = correctedQuery || rawQuery;
+  if (!base) return [];
+
+  const suggestions = [
+    correctedQuery !== rawQuery ? correctedQuery : "",
+    buildSearchVariantQuery(mode, base, 1),
+    buildSearchVariantQuery(mode, base, 2),
+    mode === "music" ? `${base} karaoke` : `${base} shorts`,
+    mode === "music" ? `${base} instrumental` : `${base} tutorial`,
+  ].filter((entry) => entry.length > 0);
+
+  return [...new Set(suggestions)].slice(0, 5);
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -76,16 +238,126 @@ export const searchMedia = async (req: Request, res: Response): Promise<Response
   const parsed = searchSchema.safeParse(req.query);
   if (!parsed.success) return sendError(res, 400, "Invalid query params");
 
+  const mode = parsed.data.type as "music" | "video";
+  const pageIndex = parseIndexToken(parsed.data.pageToken);
+  const realtimeId = parsed.data.realtimeId;
+  const rawQuery = (parsed.data.q ?? "").trim();
+  const correctedQuery = rawQuery ? autoCorrectSearchQuery(rawQuery) : "";
+  const effectiveBaseQuery = correctedQuery || rawQuery;
+
+  const publishProgress = (percent: number, message: string): void => {
+    if (!realtimeId) return;
+    sendRealtimeEvent(realtimeId, {
+      type: "search:progress",
+      mode,
+      page: pageIndex,
+      percent,
+      message,
+      query: rawQuery,
+    });
+  };
+
+  if (pageIndex >= MAX_SEARCH_PAGES) {
+    return res.json({
+      items: [],
+      nextPageToken: null,
+      correctedQuery: correctedQuery !== rawQuery ? correctedQuery : null,
+      suggestions: buildSearchSuggestions(mode, rawQuery, correctedQuery),
+    });
+  }
+
   try {
-    const { items, nextPageToken } = await searchYoutube(
-      parsed.data.q,
-      parsed.data.type as "music" | "video",
-      parsed.data.pageToken
-    );
-    return res.json({ items, nextPageToken });
+    const queryForPage = effectiveBaseQuery
+      ? buildSearchVariantQuery(mode, effectiveBaseQuery, pageIndex)
+      : undefined;
+
+    publishProgress(12, `Searching "${queryForPage ?? "trending"}"`);
+    const primary = await searchYoutube(queryForPage, mode);
+    publishProgress(55, `Collected ${primary.items.length} results`);
+
+    let combined = [...primary.items];
+
+    if (queryForPage && combined.length < 20) {
+      const fallbackQuery = buildSearchVariantQuery(mode, effectiveBaseQuery, pageIndex + 5);
+      publishProgress(72, `Expanding results with "${fallbackQuery}"`);
+      const fallback = await searchYoutube(fallbackQuery, mode);
+      combined = combined.concat(fallback.items);
+    }
+
+    const items = dedupeById(combined).slice(0, 24);
+    const nextPageToken = effectiveBaseQuery
+      ? pageIndex + 1 < MAX_SEARCH_PAGES
+        ? String(pageIndex + 1)
+        : null
+      : primary.nextPageToken;
+
+    publishProgress(100, `Ready: ${items.length} results`);
+
+    return res.json({
+      items,
+      nextPageToken,
+      correctedQuery: correctedQuery !== rawQuery ? correctedQuery : null,
+      suggestions: buildSearchSuggestions(mode, rawQuery, correctedQuery),
+      appliedQuery: queryForPage ?? null,
+    });
   } catch (error) {
     console.error("Search Error:", error);
+    publishProgress(100, "Search failed");
     return sendError(res, 502, "Unable to fetch media from upstream sources right now");
+  }
+};
+
+/** GET /api/media/home */
+export const getHomeFeed = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = homeFeedSchema.safeParse(req.query);
+  if (!parsed.success) return sendError(res, 400, "Invalid home feed params");
+
+  const mode = parsed.data.mode;
+  const pageIndex = parseIndexToken(parsed.data.pageToken);
+  const seed = parseIndexToken(parsed.data.sessionSeed);
+  const language = normalizeLanguage(parsed.data.language);
+  const realtimeId = parsed.data.realtimeId;
+
+  const publishProgress = (percent: number, message: string): void => {
+    if (!realtimeId) return;
+    sendRealtimeEvent(realtimeId, {
+      type: "home-feed:progress",
+      mode,
+      page: pageIndex,
+      percent,
+      message,
+    });
+  };
+
+  if (pageIndex >= MAX_HOME_PAGES) {
+    return res.json({ items: [], nextPageToken: null });
+  }
+
+  try {
+    const primaryQuery = buildHomeQuery(mode, language, pageIndex, seed);
+    publishProgress(15, `Finding ${mode === "music" ? "songs" : "videos"} for "${primaryQuery}"`);
+
+    const primary = await searchYoutube(primaryQuery, mode);
+    publishProgress(60, `Collected ${primary.items.length} candidates`);
+
+    let combined = [...primary.items];
+
+    if (combined.length < 20) {
+      const fallbackQuery = buildHomeQuery(mode, language, pageIndex + 3, seed + 5);
+      publishProgress(75, `Expanding feed with "${fallbackQuery}"`);
+      const fallback = await searchYoutube(fallbackQuery, mode);
+      combined = combined.concat(fallback.items);
+    }
+
+    const items = dedupeById(combined).slice(0, 20);
+    const nextPageToken = pageIndex + 1 < MAX_HOME_PAGES ? String(pageIndex + 1) : null;
+
+    publishProgress(100, `Ready: ${items.length} items`);
+    return res.json({ items, nextPageToken });
+  } catch (error) {
+    console.error("Home Feed Error:", error);
+    publishProgress(100, "Feed update failed");
+    return sendError(res, 502, "Unable to load home feed right now");
   }
 };
 
