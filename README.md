@@ -78,23 +78,36 @@ npm run dev
 
 ### Frontend (Vercel)
 
-- Import `client` directory as a Vercel project.
-- Build command: `npm run build`
-- Output directory: `dist`
-- Set env:
+- Create a new Vercel project and set **Root Directory** to `client`.
+- Framework preset: `Vite`.
+- Build command: `npm run build`.
+- Output directory: `dist`.
+- Keep `client/vercel.json` enabled (SPA rewrite + security headers).
+- Add environment variables:
   - `VITE_API_URL=https://your-render-api.onrender.com/api`
-  - `VITE_GOOGLE_CLIENT_ID=...`
+  - `VITE_GOOGLE_CLIENT_ID=<google-oauth-web-client-id>`
+- If you use a custom domain, add it in Vercel first, then use that exact URL in Render `CLIENT_URL`.
 
 ### Backend (Render)
 
-- Use `render.yaml` blueprint or create a Web Service pointing to `server`.
-- Set all required env vars listed in `server/.env.example`.
-- Google Authorization Code flow requires both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the backend.
-- Default Google redirect for popup flow is `GOOGLE_REDIRECT_URI=postmessage`.
-- Ensure `CLIENT_URL` matches your Vercel domain.
+- Use `render.yaml` blueprint (recommended) or create a Web Service manually with **Root Directory** `server`.
+- Build command: `npm install && npm run build`.
+- Start command: `npm run start`.
+- Health check path: `/health`.
+- Set environment variables:
+  - Required: `CLIENT_URL`, `MONGO_URI`, `JWT_SECRET`, `GOOGLE_CLIENT_ID`.
+  - Required for Google auth code flow: `GOOGLE_CLIENT_SECRET`.
+  - Recommended: `JWT_EXPIRES_IN=30d`, `GOOGLE_REDIRECT_URI=postmessage`, `PIPED_INSTANCES=<comma-separated instances>`.
+  - Optional (OTP email): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
+- Keep `NODE_ENV=production`.
+- Do not hardcode `PORT`; Render injects it automatically.
 
 ## Production Notes
 
+- Backend CORS now only allows:
+  - Your configured `CLIENT_URL`.
+  - Local dev origins (`localhost` ports 3000/4173/5173).
+  - Render/Vercel preview subdomains.
 - Configure at least two Piped instances in `PIPED_INSTANCES` for failover.
 - OTP email falls back to console logging in development if SMTP is not configured.
 - Rotate JWT secret and enforce secure secret management in production.

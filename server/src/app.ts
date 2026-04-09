@@ -9,29 +9,43 @@ import { apiRouter } from "./routes/index.js";
 
 export const app = express();
 
-// Collect all allowed CORS origins
-const allowedOrigins = new Set<string>(
-  [
-    env.CLIENT_URL,
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://localhost:4173",
-  ].filter(Boolean)
-);
+const normalizeOrigin = (value: string): string => {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value;
+  }
+};
+
+// Trust Render's reverse proxy so req.ip and rate-limit work correctly.
+app.set("trust proxy", 1);
+
+const allowedOrigins = new Set<string>([
+  normalizeOrigin(env.CLIENT_URL),
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://localhost:4173"
+]);
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (curl, mobile apps, Render health-checks)
+      // Allow requests with no origin (curl, server-to-server, health checks).
       if (!origin) return callback(null, true);
-      if (allowedOrigins.has(origin)) return callback(null, true);
-      // Allow any Render preview subdomain (*.onrender.com)
-      if (/\.onrender\.com$/.test(origin)) return callback(null, true);
-      // Allow any Vercel preview subdomain (*.vercel.app)
-      if (/\.vercel\.app$/.test(origin)) return callback(null, true);
-      callback(null, true); // Permissive — tighten in production if needed
+
+      const normalized = normalizeOrigin(origin);
+      if (allowedOrigins.has(normalized)) return callback(null, true);
+
+      // Allow Render preview domains.
+      if (/^https:\/\/.+\.onrender\.com$/.test(normalized)) return callback(null, true);
+
+      // Allow Vercel preview domains.
+      if (/^https:\/\/.+\.vercel\.app$/.test(normalized)) return callback(null, true);
+
+      return callback(null, false);
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["authorization", "content-type", "range"],
     exposedHeaders: [
       "content-range",
@@ -40,8 +54,8 @@ app.use(
       "content-type",
       "cache-control",
       "etag",
-      "x-adfrio-proxy",
-    ],
+      "x-adfrio-proxy"
+    ]
   })
 );
 app.use(

@@ -4,14 +4,13 @@ services:
     env: node
     rootDir: server
     plan: free
+    healthCheckPath: /health
     buildCommand: npm install && npm run build
     startCommand: npm run start
     autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 10000
       - key: CLIENT_URL
         sync: false
       - key: MONGO_URI
