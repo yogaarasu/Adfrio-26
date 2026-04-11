@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { mediaApi, playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
 import { usePreferencesStore } from "@/store/preferences-store";
 import { SearchBox } from "@/components/media/search-box";
 import { MediaCard } from "@/components/media/media-card";
 import { Card } from "@/components/ui/card";
-import { useScrollThreshold } from "@/hooks/use-scroll-threshold";
+import { RealtimeTimeline } from "@/components/ui/realtime-timeline";
+import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
+import { useRealtimeTimeline } from "@/hooks/use-realtime-timeline";
 import { buildLanguageQuery } from "@/lib/media-query";
 import { dedupeMediaItems, filterStrictSongs } from "@/lib/media-filters";
 import type { MediaItem } from "@/types/media";
@@ -27,7 +28,7 @@ export const SearchPage = () => {
   const [query, setQuery] = useState("");
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [realtimeProgress, setRealtimeProgress] = useState<string | null>(null);
+  const [suggestionsHidden, setSuggestionsHidden] = useState(false);
 
   const playAudio = usePlayerStore((state) => state.playAudio);
   const playVideo = usePlayerStore((state) => state.playVideo);
@@ -35,6 +36,7 @@ export const SearchPage = () => {
   const current = usePlayerStore((state) => state.current);
   const playing = usePlayerStore((state) => state.playing);
   const { connectionId, lastMessage } = useRealtimeConnection();
+  const { timeline, push, clear } = useRealtimeTimeline();
 
   const search = useInfiniteQuery({
     queryKey: ["search-mode", mode, language, query],
@@ -68,19 +70,14 @@ export const SearchPage = () => {
   useEffect(() => {
     if (!lastMessage || lastMessage.type !== "search:progress") return;
     if (lastMessage.mode !== mode) return;
-    const percentValue = typeof lastMessage.percent === "number" ? lastMessage.percent : null;
-    if (percentValue !== null && percentValue >= 100) {
-      setRealtimeProgress(null);
-      return;
-    }
-    const percent = percentValue !== null ? `${percentValue}%` : "Live";
+    const percent = typeof lastMessage.percent === "number" ? lastMessage.percent : null;
     const text = typeof lastMessage.message === "string" ? lastMessage.message : "Searching...";
-    setRealtimeProgress(`${percent} - ${text}`);
-  }, [lastMessage, mode]);
+    push(percent, text);
+  }, [lastMessage, mode, push]);
 
   useEffect(() => {
-    setRealtimeProgress(null);
-  }, [mode, language, query]);
+    clear();
+  }, [clear, mode, language, query]);
 
   useEffect(() => {
     if (mode !== "music" || items.length === 0) return;
@@ -92,8 +89,7 @@ export const SearchPage = () => {
       void search.fetchNextPage();
     }
   }, [search]);
-
-  useScrollThreshold(loadMore, 0.8);
+  const loaderRef = useInfiniteTrigger(loadMore);
 
   const ensureFavoritesPlaylist = useCallback(async () => {
     const playlists = await playlistApi.list();
@@ -180,9 +176,16 @@ export const SearchPage = () => {
 
       <SearchBox
         value={query}
-        onChange={setQuery}
+        onChange={(value) => {
+          setQuery(value);
+          setSuggestionsHidden(false);
+        }}
         placeholder={mode === "music" ? "Search songs..." : "Search videos..."}
       />
+
+      {timeline && query.trim().length > 0 ? (
+        <RealtimeTimeline timeline={timeline} label="Live Search Timeline" />
+      ) : null}
 
       {correctedQuery ? (
         <p className="text-xs text-white/60">
@@ -190,23 +193,22 @@ export const SearchPage = () => {
         </p>
       ) : null}
 
-      {suggestions.length > 0 ? (
+      {suggestions.length > 0 && !suggestionsHidden ? (
         <div className="flex flex-wrap gap-2">
           {suggestions.map((entry) => (
             <button
               key={entry}
               type="button"
-              onClick={() => setQuery(entry)}
+              onClick={() => {
+                setQuery(entry);
+                setSuggestionsHidden(true);
+              }}
               className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs text-white/85 transition hover:bg-white/10"
             >
               {entry}
             </button>
           ))}
         </div>
-      ) : null}
-
-      {realtimeProgress && query.trim().length > 0 ? (
-        <p className="text-xs text-white/45">Live: {realtimeProgress}</p>
       ) : null}
 
       {statusMessage ? (
@@ -224,19 +226,22 @@ export const SearchPage = () => {
       ) : null}
 
       {!showEmptyState ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((item) => (
-            <MediaCard
-              key={item.id}
-              item={item}
-              onPlay={(entry) => playMedia(entry, items)}
-              onAdd={addToFavorites}
-              isLoading={loadingItemId === item.id}
-              isCurrentTrack={current?.id === item.id}
-              isCurrentPlaying={current?.id === item.id && playing}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((item) => (
+              <MediaCard
+                key={item.id}
+                item={item}
+                onPlay={(entry) => playMedia(entry, items)}
+                onAdd={addToFavorites}
+                isLoading={loadingItemId === item.id}
+                isCurrentTrack={current?.id === item.id}
+                isCurrentPlaying={current?.id === item.id && playing}
+              />
+            ))}
+          </div>
+          <div ref={loaderRef} className="h-3" />
+        </>
       ) : null}
 
       {(search.isLoading || search.isFetchingNextPage) && !showEmptyState ? (

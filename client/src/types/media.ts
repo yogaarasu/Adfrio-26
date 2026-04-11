@@ -4,6 +4,7 @@ export type MediaItem = {
   id: string;
   title: string;
   creator: string;
+  creatorAvatarUrl?: string | null;
   thumbnail: string;
   duration: number | null;
   type: MediaType;

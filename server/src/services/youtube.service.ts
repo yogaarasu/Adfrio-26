@@ -22,6 +22,7 @@ export interface MediaItem {
   id: string;
   title: string;
   creator: string;
+  creatorAvatarUrl?: string | null;
   thumbnail: string;
   duration: number | null;
   type: "music" | "video";
@@ -92,6 +93,7 @@ export const searchYoutube = async (
       id: v.id,
       title: v.title,
       creator: v.creator,
+      creatorAvatarUrl: v.creatorAvatarUrl ?? null,
       thumbnail: v.thumbnail,
       duration: v.duration,
       type: type as "music" | "video",
@@ -116,6 +118,7 @@ export const searchYoutube = async (
           id: v.id || "",
           title: v.title || "Unknown Title",
           creator: v.channel?.name || "Unknown Creator",
+          creatorAvatarUrl: (v as any).channel?.icons?.[0]?.url ?? null,
           thumbnail: v.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
           duration: v.durationInSec || null,
           type: type as "music" | "video",
@@ -136,6 +139,7 @@ export const searchYoutube = async (
               id,
               title: m.title || "Unknown Title",
               creator: m.uploaderName || "Unknown Artist",
+              creatorAvatarUrl: null,
               thumbnail: m.thumbnail || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
               duration: m.duration || null,
               type: type as "music" | "video",
@@ -328,6 +332,7 @@ const fetchFallbackRelatedVideos = async (
         id: item.id,
         title: item.title,
         creator: item.creator,
+        creatorAvatarUrl: item.creatorAvatarUrl ?? null,
         thumbnail: item.thumbnail,
         duration: item.duration,
         type: "video",
@@ -356,6 +361,7 @@ export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
       id: r.id,
       title: r.title,
       creator: r.creator,
+      creatorAvatarUrl: r.creatorAvatarUrl ?? null,
       thumbnail: r.thumbnail,
       duration: r.duration,
       type: "video" as const,

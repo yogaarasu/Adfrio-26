@@ -4,8 +4,10 @@ import { mediaApi, playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
 import { usePreferencesStore } from "@/store/preferences-store";
 import { MediaCard } from "@/components/media/media-card";
-import { useScrollThreshold } from "@/hooks/use-scroll-threshold";
+import { RealtimeTimeline } from "@/components/ui/realtime-timeline";
+import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
+import { useRealtimeTimeline } from "@/hooks/use-realtime-timeline";
 import { filterStrictSongs, dedupeMediaItems } from "@/lib/media-filters";
 import type { MediaItem } from "@/types/media";
 
@@ -21,10 +23,9 @@ export const HomePage = () => {
   const [refreshSeed] = useState(() => Math.floor(Date.now() + Math.random() * 100000));
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(20);
-  const [realtimeProgress, setRealtimeProgress] = useState<string | null>(null);
   const seenSongIdsRef = useRef<Set<string>>(new Set());
   const { connectionId, lastMessage } = useRealtimeConnection();
+  const { timeline, push, clear } = useRealtimeTimeline();
 
   const playAudio = usePlayerStore((state) => state.playAudio);
   const playVideo = usePlayerStore((state) => state.playVideo);
@@ -33,21 +34,17 @@ export const HomePage = () => {
   const playing = usePlayerStore((state) => state.playing);
 
   useEffect(() => {
-    setRealtimeProgress(null);
-  }, [language, mode]);
+    clear();
+  }, [clear, language, mode]);
 
   useEffect(() => {
     if (!lastMessage || lastMessage.type !== "home-feed:progress") return;
     if (lastMessage.mode !== mode) return;
-    const percentValue = typeof lastMessage.percent === "number" ? lastMessage.percent : null;
-    if (percentValue !== null && percentValue >= 100) {
-      setRealtimeProgress(null);
-      return;
-    }
-    const percent = percentValue !== null ? `${percentValue}%` : "Live";
-    const text = typeof lastMessage.message === "string" ? lastMessage.message : "Updating feed...";
-    setRealtimeProgress(`${percent} - ${text}`);
-  }, [lastMessage, mode]);
+    const percent = typeof lastMessage.percent === "number" ? lastMessage.percent : null;
+    const text =
+      typeof lastMessage.message === "string" ? lastMessage.message : "Updating home feed...";
+    push(percent, text);
+  }, [lastMessage, mode, push]);
 
   const homeFeed = useInfiniteQuery({
     queryKey: ["home-feed", mode, language, refreshSeed],
@@ -88,23 +85,13 @@ export const HomePage = () => {
   }, [mode]);
 
   useEffect(() => {
-    setVisibleCount(20);
-  }, [mode, language, refreshSeed]);
-
-  useEffect(() => {
-    if (visibleCount <= feedItems.length) return;
-    if (!hasNextPage || isFetchingNextPage) return;
-    void fetchNextPage();
-  }, [fetchNextPage, feedItems.length, hasNextPage, isFetchingNextPage, visibleCount]);
-
-  useEffect(() => {
     if (homeFeed.isLoading) return;
-    if (feedItems.length >= 20) return;
+    if (feedItems.length >= 18) return;
     if (!hasNextPage || isFetchingNextPage) return;
     void fetchNextPage();
   }, [feedItems.length, fetchNextPage, hasNextPage, homeFeed.isLoading, isFetchingNextPage]);
 
-  const visibleItems = useMemo(() => feedItems.slice(0, visibleCount), [feedItems, visibleCount]);
+  const visibleItems = feedItems;
 
   useEffect(() => {
     if (mode !== "music" || visibleItems.length === 0) return;
@@ -121,10 +108,11 @@ export const HomePage = () => {
   }, [mode, visibleItems]);
 
   const triggerLoadMore = useCallback(() => {
-    setVisibleCount((prev) => prev + 20);
-  }, []);
-
-  useScrollThreshold(triggerLoadMore, 0.8);
+    if (hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+  const loaderRef = useInfiniteTrigger(triggerLoadMore);
 
   const ensureFavoritesPlaylist = useCallback(async () => {
     const playlists = await playlistApi.list();
@@ -207,8 +195,9 @@ export const HomePage = () => {
             ? `Fresh ${language} songs only`
             : `Fresh ${language} trending videos`}
         </p>
-        {realtimeProgress ? <p className="text-xs text-white/45">Live: {realtimeProgress}</p> : null}
       </header>
+
+      {timeline ? <RealtimeTimeline timeline={timeline} label="Live Home Feed" /> : null}
 
       {actionMessage ? (
         <p className="rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-sm text-white/80">
@@ -242,6 +231,7 @@ export const HomePage = () => {
         {mode === "music" && visibleItems.length === 0 ? (
           <p className="text-sm text-white/60">No pure songs found right now.</p>
         ) : null}
+        <div ref={loaderRef} className="h-3" />
       </section>
 
       {(homeFeed.isLoading || homeFeed.isFetchingNextPage) && (

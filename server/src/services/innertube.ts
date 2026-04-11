@@ -38,6 +38,7 @@ export type InnertubeSearchItem = {
   id: string;
   title: string;
   creator: string;
+  creatorAvatarUrl?: string | null;
   thumbnail: string;
   duration: number | null;
 };
@@ -70,6 +71,10 @@ export const innertubeSearch = async (
       typeof authorObj === "string"
         ? authorObj
         : (authorObj?.text ?? authorObj?.runs?.[0]?.text ?? authorObj?.name ?? "Unknown Creator");
+    const creatorAvatarUrl: string | null =
+      authorObj?.thumbnails?.[0]?.url ??
+      item?.author?.thumbnails?.[0]?.url ??
+      null;
 
     const thumbSources: Array<{ url: string }> =
       (item?.best_thumbnail?.sources ?? item?.thumbnails ?? []) as Array<{ url: string }>;
@@ -82,7 +87,7 @@ export const innertubeSearch = async (
         ? item.duration.seconds
         : (item?.duration_secs as number | null | undefined) ?? null;
 
-    results.push({ id, title, creator, thumbnail, duration: durationSec });
+    results.push({ id, title, creator, creatorAvatarUrl, thumbnail, duration: durationSec });
   }
 
   return results;
@@ -99,7 +104,14 @@ export type InnertubeStreamResult = {
   likes: number | null;
   audioStreams: Array<{ url: string; mimeType: string; bitrate: number }>;
   videoStreams: Array<{ url: string; quality: string; mimeType: string }>;
-  related: Array<{ id: string; title: string; creator: string; thumbnail: string; duration: number | null }>;
+  related: Array<{
+    id: string;
+    title: string;
+    creator: string;
+    creatorAvatarUrl: string | null;
+    thumbnail: string;
+    duration: number | null;
+  }>;
   relatedIds: string[];
   hls: string | null;
   dash: string | null;
@@ -218,6 +230,7 @@ export const innertubeGetStreams = async (
     id: string;
     title: string;
     creator: string;
+    creatorAvatarUrl: string | null;
     thumbnail: string;
     duration: number | null;
   };
@@ -245,6 +258,10 @@ export const innertubeGetStreams = async (
       typeof authorObj === "string"
         ? authorObj
         : (authorObj?.text ?? authorObj?.runs?.[0]?.text ?? authorObj?.name ?? "YouTube");
+    const creatorAvatarUrl: string | null =
+      authorObj?.thumbnails?.[0]?.url ??
+      item?.author?.thumbnails?.[0]?.url ??
+      null;
 
     const thumbSources: Array<{ url: string }> =
       (item?.best_thumbnail?.sources ?? item?.thumbnails ?? []) as Array<{ url: string }>;
@@ -257,7 +274,7 @@ export const innertubeGetStreams = async (
         ? item.duration.seconds
         : (item?.duration_secs as number | null | undefined) ?? null;
 
-    related.push({ id, title, creator, thumbnail, duration: durationSec });
+    related.push({ id, title, creator, creatorAvatarUrl, thumbnail, duration: durationSec });
   }
 
   // Keep old relatedIds for backward compat

@@ -103,6 +103,81 @@ const SEARCH_FIXUPS: Record<string, string> = {
   yuotube: "youtube",
 };
 
+const SEARCH_LEXICON = [
+  "song",
+  "songs",
+  "music",
+  "video",
+  "videos",
+  "youtube",
+  "official",
+  "lyrics",
+  "lyric",
+  "trending",
+  "latest",
+  "release",
+  "playlist",
+  "remix",
+  "karaoke",
+  "instrumental",
+  "live",
+  "full",
+  "tutorial",
+  "shorts",
+  "highlights",
+  "reaction",
+  "compilation",
+  "audio",
+];
+
+const levenshteinDistance = (source: string, target: string): number => {
+  if (source === target) return 0;
+  if (!source.length) return target.length;
+  if (!target.length) return source.length;
+
+  const matrix: number[][] = Array.from({ length: source.length + 1 }, () =>
+    new Array(target.length + 1).fill(0)
+  );
+
+  for (let i = 0; i <= source.length; i += 1) matrix[i]![0] = i;
+  for (let j = 0; j <= target.length; j += 1) matrix[0]![j] = j;
+
+  for (let i = 1; i <= source.length; i += 1) {
+    for (let j = 1; j <= target.length; j += 1) {
+      const cost = source[i - 1] === target[j - 1] ? 0 : 1;
+      const deletion = matrix[i - 1]![j]! + 1;
+      const insertion = matrix[i]![j - 1]! + 1;
+      const substitution = matrix[i - 1]![j - 1]! + cost;
+      matrix[i]![j] = Math.min(deletion, insertion, substitution);
+    }
+  }
+
+  return matrix[source.length]![target.length]!;
+};
+
+const fuzzyCorrectToken = (token: string): string => {
+  if (token.length < 3 || token.length > 16) return token;
+  if (!/^[a-z]+$/i.test(token)) return token;
+
+  const lower = token.toLowerCase();
+  if (SEARCH_FIXUPS[lower]) return SEARCH_FIXUPS[lower]!;
+
+  let bestTerm = lower;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (const candidate of SEARCH_LEXICON) {
+    if (candidate.charAt(0) !== lower.charAt(0)) continue;
+    const distance = levenshteinDistance(lower, candidate);
+    const score = distance / Math.max(lower.length, candidate.length);
+    if (score < bestScore) {
+      bestScore = score;
+      bestTerm = candidate;
+    }
+  }
+
+  return bestScore <= 0.34 ? bestTerm : token;
+};
+
 const parseIndexToken = (value: string | undefined): number => {
   const parsed = Number.parseInt(value ?? "0", 10);
   if (!Number.isFinite(parsed) || parsed < 0) return 0;
@@ -158,8 +233,7 @@ const autoCorrectSearchQuery = (query: string): string => {
     .split(" ")
     .map((rawToken) => {
       const collapsed = collapseRepeatingChars(rawToken);
-      const lowered = collapsed.toLowerCase();
-      return SEARCH_FIXUPS[lowered] ?? collapsed;
+      return fuzzyCorrectToken(collapsed);
     })
     .join(" ");
 };
@@ -179,15 +253,25 @@ const buildSearchSuggestions = (
   rawQuery: string,
   correctedQuery: string
 ): string[] => {
-  const base = correctedQuery || rawQuery;
+  const sanitizedRaw = sanitizeSearchQuery(rawQuery);
+  const base = correctedQuery || sanitizedRaw;
   if (!base) return [];
 
+  const baseTokens = base
+    .toLowerCase()
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const tail = baseTokens[baseTokens.length - 1] ?? "";
+
   const suggestions = [
-    correctedQuery !== rawQuery ? correctedQuery : "",
+    correctedQuery && correctedQuery !== sanitizedRaw ? correctedQuery : "",
     buildSearchVariantQuery(mode, base, 1),
     buildSearchVariantQuery(mode, base, 2),
+    buildSearchVariantQuery(mode, base, 3),
     mode === "music" ? `${base} karaoke` : `${base} shorts`,
     mode === "music" ? `${base} instrumental` : `${base} tutorial`,
+    tail.length >= 3 ? `${base} ${fuzzyCorrectToken(tail)}` : "",
   ].filter((entry) => entry.length > 0);
 
   return [...new Set(suggestions)].slice(0, 5);
@@ -271,9 +355,10 @@ export const searchMedia = async (req: Request, res: Response): Promise<Response
       ? buildSearchVariantQuery(mode, effectiveBaseQuery, pageIndex)
       : undefined;
 
-    publishProgress(12, `Searching "${queryForPage ?? "trending"}"`);
+    publishProgress(4, "Search started");
+    publishProgress(14, `Searching "${queryForPage ?? "trending"}"`);
     const primary = await searchYoutube(queryForPage, mode);
-    publishProgress(55, `Collected ${primary.items.length} results`);
+    publishProgress(56, `Collected ${primary.items.length} results`);
 
     let combined = [...primary.items];
 
@@ -291,6 +376,7 @@ export const searchMedia = async (req: Request, res: Response): Promise<Response
         : null
       : primary.nextPageToken;
 
+    publishProgress(88, `Finalizing ${items.length} results`);
     publishProgress(100, `Ready: ${items.length} results`);
 
     return res.json({
@@ -335,10 +421,11 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<Response
 
   try {
     const primaryQuery = buildHomeQuery(mode, language, pageIndex, seed);
-    publishProgress(15, `Finding ${mode === "music" ? "songs" : "videos"} for "${primaryQuery}"`);
+    publishProgress(4, "Feed update started");
+    publishProgress(16, `Finding ${mode === "music" ? "songs" : "videos"} for "${primaryQuery}"`);
 
     const primary = await searchYoutube(primaryQuery, mode);
-    publishProgress(60, `Collected ${primary.items.length} candidates`);
+    publishProgress(61, `Collected ${primary.items.length} candidates`);
 
     let combined = [...primary.items];
 
@@ -352,6 +439,7 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<Response
     const items = dedupeById(combined).slice(0, 20);
     const nextPageToken = pageIndex + 1 < MAX_HOME_PAGES ? String(pageIndex + 1) : null;
 
+    publishProgress(90, `Finalizing ${items.length} items`);
     publishProgress(100, `Ready: ${items.length} items`);
     return res.json({ items, nextPageToken });
   } catch (error) {
@@ -405,6 +493,7 @@ export const getMediaStreams = async (req: Request, res: Response): Promise<Resp
       id: r.id,
       title: r.title,
       creator: r.creator,
+      creatorAvatarUrl: r.creatorAvatarUrl ?? null,
       thumbnail: r.thumbnail,
       duration: r.duration,
       type: r.type,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Pause,
   Play,
@@ -15,6 +15,7 @@ import {
   Moon,
   Plus,
   Check,
+  ExternalLink,
 } from "lucide-react";
 import _ReactPlayer from "react-player";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import { useMediaSession } from "@/hooks/use-media-session";
 import { SleepTimer } from "@/components/player/sleep-timer";
 import { playlistApi } from "@/services/api";
 import { formatDuration } from "@/lib/utils";
+import { accentColorFromSeed } from "@/lib/accent-color";
 
 const ReactPlayer = _ReactPlayer as any;
 
@@ -181,7 +183,7 @@ export const GlobalAudioPlayer = () => {
     }
     closeSheetTimerRef.current = setTimeout(() => {
       setIsSheetMounted(false);
-    }, 280);
+    }, 480);
   }, []);
 
   const addCurrentToFavorites = useCallback(async () => {
@@ -294,6 +296,11 @@ export const GlobalAudioPlayer = () => {
   const canReopenVideo = current.type === "video" && !video.active;
   const activeDuration = duration > 0 ? duration : Number(current.duration ?? 0);
   const sleepMinutesLeft = sleepUntil ? Math.max(0, Math.round((sleepUntil - Date.now()) / 60000)) : null;
+  const accentSeed = `${current.id}-${current.creator}-${current.title}`;
+  const accentStrong = useMemo(() => accentColorFromSeed(accentSeed, 78, 57, 1), [accentSeed]);
+  const accentSoft = useMemo(() => accentColorFromSeed(accentSeed, 72, 52, 0.35), [accentSeed]);
+  const accentGlow = useMemo(() => accentColorFromSeed(accentSeed, 86, 62, 0.28), [accentSeed]);
+  const youtubeTrackUrl = `https://www.youtube.com/watch?v=${current.id}`;
 
   return (
     <>
@@ -412,18 +419,13 @@ export const GlobalAudioPlayer = () => {
 
       {!video.active ? (
         <div
-          className="fixed bottom-16 left-0 right-0 z-50 border-t border-white/20 bg-black/95 px-4 py-3 backdrop-blur-md md:bottom-0"
+          className="fixed bottom-16 left-0 right-0 z-50 border-t border-white/20 px-4 py-3 backdrop-blur-md md:bottom-0"
+          style={{
+            backgroundImage: `linear-gradient(180deg, ${accentSoft} 0%, rgba(0,0,0,0.9) 42%, rgba(0,0,0,0.96) 100%)`,
+            boxShadow: `0 -12px 34px ${accentGlow}`
+          }}
           role="region"
           aria-label="Audio player"
-          onClick={() => {
-            if (canReopenVideo) {
-              openVideoOverlay();
-              return;
-            }
-            if (current.type === "music") {
-              openSongSheet();
-            }
-          }}
         >
           <div
             className="group mb-3 h-1.5 w-full cursor-pointer rounded-full bg-white/15"
@@ -452,8 +454,8 @@ export const GlobalAudioPlayer = () => {
             }}
           >
             <div
-              className="relative h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-150"
-              style={{ width: `${progress}%` }}
+              className="relative h-full rounded-full transition-all duration-200"
+              style={{ width: `${progress}%`, backgroundColor: accentStrong }}
             >
               <div className="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1.5 rounded-full bg-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100" />
             </div>
@@ -466,31 +468,46 @@ export const GlobalAudioPlayer = () => {
             </div>
           ) : null}
 
-          <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg shadow-lg">
-              {current.thumbnail ? (
-                <img src={current.thumbnail} alt={current.title} className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-white/10">
-                  <Music className="h-5 w-5 text-white/50" />
-                </div>
-              )}
-              {isLoading ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                  <Loader2 className="h-4 w-4 animate-spin text-white" />
-                </div>
-              ) : null}
-            </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (canReopenVideo) {
+                  openVideoOverlay();
+                  return;
+                }
+                if (current.type === "music") {
+                  openSongSheet();
+                }
+              }}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl p-1 text-left transition hover:bg-white/5"
+              aria-label="Open now playing details"
+            >
+              <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg shadow-lg">
+                {current.thumbnail ? (
+                  <img src={current.thumbnail} alt={current.title} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-white/10">
+                    <Music className="h-5 w-5 text-white/50" />
+                  </div>
+                )}
+                {isLoading ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                  </div>
+                ) : null}
+              </div>
 
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{current.title}</p>
-              <p className="truncate text-xs text-white/60">{current.creator}</p>
-              <p className="text-xs text-white/40">
-                {formatDuration(Math.floor(currentTime))} / {formatDuration(Math.floor(activeDuration))}
-              </p>
-            </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{current.title}</p>
+                <p className="truncate text-xs text-white/60">{current.creator}</p>
+                <p className="text-xs text-white/40">
+                  {formatDuration(Math.floor(currentTime))} / {formatDuration(Math.floor(activeDuration))}
+                </p>
+              </div>
+            </button>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
               <Button variant="ghost" size="icon" onClick={() => jump(-1)} aria-label="Previous track">
                 <SkipBack className="h-4 w-4" />
               </Button>
@@ -510,7 +527,8 @@ export const GlobalAudioPlayer = () => {
                 size="icon"
                 onClick={onTogglePlay}
                 disabled={isLoading && playing}
-                className="h-10 w-10 rounded-full bg-indigo-600 hover:bg-indigo-500"
+                className="h-10 w-10 rounded-full hover:brightness-110"
+                style={{ backgroundColor: accentStrong }}
                 aria-label={playing ? "Pause" : "Play"}
               >
                 {isLoading ? (
@@ -537,7 +555,7 @@ export const GlobalAudioPlayer = () => {
               </Button>
             </div>
 
-            <div className="hidden items-center gap-2 md:flex">
+            <div className="hidden items-center gap-2 md:flex" onClick={(e) => e.stopPropagation()}>
               <button
                 onClick={onToggleMute}
                 aria-label={isMuted ? "Unmute" : "Mute"}
@@ -557,12 +575,13 @@ export const GlobalAudioPlayer = () => {
                   setVolume(val);
                   if (val > 0 && isMuted) setIsMuted(false);
                 }}
-                className="w-24 accent-indigo-400"
+                className="w-24"
+                style={{ accentColor: accentStrong }}
                 aria-label="Volume"
               />
             </div>
 
-            <div className="hidden md:block">
+            <div className="hidden md:block" onClick={(e) => e.stopPropagation()}>
               <SleepTimer />
             </div>
           </div>
@@ -573,7 +592,7 @@ export const GlobalAudioPlayer = () => {
         <div className="fixed inset-0 z-[55] md:hidden" role="dialog" aria-modal="true" aria-label="Now playing">
           <button
             type="button"
-            className={`absolute inset-0 bg-black/80 transition-opacity duration-300 ${
+            className={`absolute inset-0 bg-black/80 transition-opacity duration-500 ${
               isSheetVisible ? "opacity-100" : "opacity-0"
             }`}
             onClick={closeSongSheet}
@@ -581,10 +600,15 @@ export const GlobalAudioPlayer = () => {
           />
 
           <div
-            className={`absolute inset-0 flex flex-col bg-zinc-950 transition-transform duration-300 ${
+            className={`absolute inset-0 flex flex-col transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               isSheetVisible ? "translate-y-0" : "translate-y-full"
             }`}
+            style={{
+              backgroundImage: `linear-gradient(180deg, ${accentSoft} 0%, rgba(8,8,8,0.96) 36%, rgba(4,4,4,1) 100%)`,
+              boxShadow: `0 -24px 44px ${accentGlow}`
+            }}
           >
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/45 to-transparent" />
             <div className="flex items-center justify-start px-3 pt-4">
               <Button variant="ghost" size="icon" onClick={closeSongSheet} aria-label="Close expanded player">
                 <ChevronDown className="h-6 w-6" />
@@ -619,8 +643,8 @@ export const GlobalAudioPlayer = () => {
                     tabIndex={0}
                   >
                     <div
-                      className="relative h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-150"
-                      style={{ width: `${progress}%` }}
+                      className="relative h-full rounded-full transition-all duration-200"
+                      style={{ width: `${progress}%`, backgroundColor: accentStrong }}
                     >
                       <div className="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1.5 rounded-full bg-white opacity-0 transition-opacity group-active:opacity-100" />
                     </div>
@@ -631,11 +655,36 @@ export const GlobalAudioPlayer = () => {
                   </div>
                 </div>
 
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2">
+                    <p className="text-white/55">Queue</p>
+                    <p className="mt-1 font-semibold text-white">{Math.max(queue.length, 1)} tracks</p>
+                  </div>
+                  <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2">
+                    <p className="text-white/55">Sleep Timer</p>
+                    <p className="mt-1 font-semibold text-white">
+                      {sleepMinutesLeft !== null && sleepMinutesLeft > 0 ? `${sleepMinutesLeft} min left` : "Off"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  <a
+                    href={youtubeTrackUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs text-white/85 transition hover:bg-white/10"
+                  >
+                    Open On YouTube
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
+
                 {saveMessage ? <p className="mt-3 text-center text-xs text-white/70">{saveMessage}</p> : null}
               </div>
             </div>
 
-            <div className="absolute inset-x-0 bottom-0 border-t border-white/10 bg-black/85 px-4 pb-5 pt-4 backdrop-blur-md">
+            <div className="absolute inset-x-0 bottom-0 border-t border-white/10 bg-black/80 px-4 pb-5 pt-4 backdrop-blur-md">
               <div className="relative flex items-center justify-between">
                 <Button
                   variant="ghost"
@@ -659,7 +708,8 @@ export const GlobalAudioPlayer = () => {
                     size="icon"
                     onClick={onTogglePlay}
                     disabled={isLoading && playing}
-                    className="h-12 w-12 rounded-full bg-indigo-600 hover:bg-indigo-500"
+                    className="h-12 w-12 rounded-full hover:brightness-110"
+                    style={{ backgroundColor: accentStrong }}
                     aria-label={playing ? "Pause" : "Play"}
                   >
                     {isLoading ? (
