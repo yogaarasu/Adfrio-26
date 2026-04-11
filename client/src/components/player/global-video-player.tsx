@@ -1,21 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  X,
-  Loader2,
-  Plus,
-  ThumbsUp,
-  ChevronDown,
-  ChevronUp,
-  Captions,
-  ExternalLink
-} from "lucide-react";
+import { ChevronDown, Loader2, Plus, ThumbsUp, X } from "lucide-react";
 import _ReactPlayer from "react-player";
 import { Button } from "@/components/ui/button";
 import { mediaApi, playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
-import { usePreferencesStore } from "@/store/preferences-store";
-import { formatDuration } from "@/lib/utils";
 import { accentColorFromSeed } from "@/lib/accent-color";
+import { formatDuration } from "@/lib/utils";
 import type { MediaItem } from "@/types/media";
 
 const ReactPlayer = _ReactPlayer as any;
@@ -25,7 +15,7 @@ const YT_ERROR_LABELS: Record<number, string> = {
   5: "HTML5 player error",
   100: "Video not found or removed",
   101: "Embedded playback disabled by owner",
-  150: "Embedded playback disabled by owner"
+  150: "Embedded playback disabled by owner",
 };
 
 const formatLikes = (likes: number | null): string => {
@@ -44,21 +34,18 @@ export const GlobalVideoPlayer = () => {
   const playing = usePlayerStore((state) => state.playing);
   const playVideo = usePlayerStore((state) => state.playVideo);
   const updateVideoSession = usePlayerStore((state) => state.updateVideoSession);
-  const videoAutoplay = usePreferencesStore((state) => state.videoAutoplay);
-  const setVideoAutoplay = usePreferencesStore((state) => state.setVideoAutoplay);
 
   const [relatedError, setRelatedError] = useState<string | null>(null);
   const [loadingRelatedId, setLoadingRelatedId] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [isBuffering, setIsBuffering] = useState(true);
-  const [showDescription, setShowDescription] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [savingToPlaylist, setSavingToPlaylist] = useState(false);
-  const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
 
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relatedHydrationRef = useRef<Set<string>>(new Set());
@@ -73,9 +60,7 @@ export const GlobalVideoPlayer = () => {
         closeTimerRef.current = null;
       }
       setIsMounted(true);
-      requestAnimationFrame(() => {
-        setIsVisible(true);
-      });
+      requestAnimationFrame(() => setIsVisible(true));
       return;
     }
 
@@ -84,28 +69,25 @@ export const GlobalVideoPlayer = () => {
     closeTimerRef.current = setTimeout(() => {
       setIsMounted(false);
       closeTimerRef.current = null;
+      setDescriptionOpen(false);
     }, 300);
   }, [isMounted, shouldOpen]);
 
   useEffect(
     () => () => {
-      if (closeTimerRef.current) {
-        clearTimeout(closeTimerRef.current);
-      }
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     },
     []
   );
 
   useEffect(() => {
-    if (current?.id) {
-      setVideoError(null);
-      setIsBuffering(true);
-      setCurrentTime(0);
-      setDuration(0);
-      setShowDescription(false);
-      setSaveMessage(null);
-      setCaptionsEnabled(false);
-    }
+    if (!current?.id) return;
+    setVideoError(null);
+    setIsBuffering(true);
+    setCurrentTime(0);
+    setDuration(0);
+    setSaveMessage(null);
+    setDescriptionOpen(false);
   }, [current?.id]);
 
   useEffect(() => {
@@ -122,7 +104,7 @@ export const GlobalVideoPlayer = () => {
           description: stream.description,
           uploader: stream.uploader,
           uploaderAvatarUrl: stream.uploaderAvatarUrl ?? null,
-          likes: stream.likes ?? null
+          likes: stream.likes ?? null,
         });
       })
       .catch(() => undefined);
@@ -148,7 +130,7 @@ export const GlobalVideoPlayer = () => {
         title: current.title,
         creator: current.creator,
         artwork: current.thumbnail,
-        duration: current.duration
+        duration: current.duration,
       });
       setSaveMessage("Saved to Favorites");
     } catch {
@@ -164,12 +146,11 @@ export const GlobalVideoPlayer = () => {
       setRelatedError(null);
       setLoadingRelatedId(item.id);
       setSaveMessage(null);
-
       try {
         playVideo({ ...item, type: "video" }, [], {
           related: video.related,
           uploader: item.creator,
-          uploaderAvatarUrl: item.creatorAvatarUrl ?? null
+          uploaderAvatarUrl: item.creatorAvatarUrl ?? null,
         });
         mediaApi
           .streams(item.id)
@@ -179,7 +160,7 @@ export const GlobalVideoPlayer = () => {
               description: stream.description,
               uploader: stream.uploader,
               uploaderAvatarUrl: stream.uploaderAvatarUrl ?? null,
-              likes: stream.likes ?? null
+              likes: stream.likes ?? null,
             });
           })
           .catch(() => undefined);
@@ -195,14 +176,13 @@ export const GlobalVideoPlayer = () => {
   if (!isMounted || !current || current.type !== "video") return null;
 
   const ytUrl = `https://www.youtube.com/watch?v=${current.id}`;
-  const descriptionText = video.description?.trim() || "No description available for this video.";
-  const relatedItems = video.related.slice(0, 20);
+  const relatedItems = video.related.slice(0, 18);
   const activeDuration = duration > 0 ? duration : Number(current.duration ?? 0);
-  const progress = activeDuration > 0 ? Math.min(100, (currentTime / activeDuration) * 100) : 0;
-  const channelInitial = (video.uploader || current.creator || "A").charAt(0).toUpperCase();
+  const channelName = video.uploader || current.creator || "Unknown Channel";
+  const channelInitial = channelName.charAt(0).toUpperCase();
   const accentSeed = `${current.id}-${current.creator}-${current.title}`;
-  const accentStrong = accentColorFromSeed(accentSeed, 78, 57, 1);
   const accentSoft = accentColorFromSeed(accentSeed, 72, 52, 0.32);
+  const descriptionText = video.description?.trim() || "No description available for this video.";
 
   return (
     <div
@@ -210,317 +190,215 @@ export const GlobalVideoPlayer = () => {
         isVisible ? "translate-y-0" : "translate-y-full"
       }`}
       style={{
-        backgroundImage: `linear-gradient(180deg, ${accentSoft} 0%, rgba(0,0,0,0.94) 24%, rgba(0,0,0,0.98) 100%)`
+        backgroundImage: `linear-gradient(180deg, ${accentSoft} 0%, rgba(0,0,0,0.95) 24%, rgba(0,0,0,0.99) 100%)`,
       }}
     >
-      <div className="flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent px-4 py-3">
-        <h2 className="max-w-xs truncate text-sm uppercase tracking-[0.16em] text-white/70">{current.title}</h2>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={clearVideo}
-          className="shrink-0 text-white hover:bg-white/10"
-          aria-label="Close video player"
-        >
-          <X className="h-5 w-5" />
-        </Button>
-      </div>
+      <header className="pointer-events-none absolute inset-x-0 top-0 z-30">
+        <div className="mx-auto flex h-12 w-full max-w-5xl items-center justify-start px-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={clearVideo}
+            className="pointer-events-auto bg-black/55 hover:bg-black/75"
+            aria-label="Close video player"
+          >
+            <ChevronDown className="h-5 w-5" />
+          </Button>
+        </div>
+      </header>
 
-      <div className="flex-1 overflow-hidden lg:grid lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-h-0 overflow-y-auto lg:overflow-hidden">
-          {videoError ? (
-            <div className="mx-3 mb-2 rounded-xl border border-red-500/30 bg-red-900/80 px-4 py-3 text-sm text-red-200">
-              {videoError}
-            </div>
-          ) : null}
-
-          <div className="relative w-full bg-black lg:ml-4 lg:w-[min(62vw,980px)]" style={{ aspectRatio: "16 / 9" }}>
-            {isBuffering && !videoError ? (
-              <div className="absolute inset-0 z-10 flex items-center justify-center">
-                <Loader2 className="h-12 w-12 animate-spin text-white/70" />
-              </div>
-            ) : null}
-
-            <ReactPlayer
-              key={`video-${current.id}`}
-              ref={playerRef}
-              src={ytUrl}
-              playing={playing}
-              controls
-              width="100%"
-              height="100%"
-              style={{ position: "absolute", inset: 0 }}
-              config={{
-                youtube: {
-                  playerVars: {
-                    autoplay: 1,
-                    controls: 1,
-                    rel: 0,
-                    modestbranding: 1,
-                    playsinline: 1,
-                    iv_load_policy: 3,
-                    fs: 1,
-                    disablekb: 0,
-                    cc_load_policy: captionsEnabled ? 1 : 0
-                  }
-                }
-              }}
-              onReady={() => {
-                setIsBuffering(false);
-                setVideoError(null);
-              }}
-              onDuration={(value: number) => {
-                const safeDuration = Number.isFinite(value) && value > 0 ? value : 0;
-                setDuration(safeDuration);
-                setProgress(currentTime, safeDuration);
-              }}
-              onProgress={(state: { playedSeconds?: number }) => {
-                const nextTime = Number(state.playedSeconds);
-                const safeTime = Number.isFinite(nextTime) ? nextTime : 0;
-                const resolvedDuration =
-                  (typeof playerRef.current?.getDuration === "function"
-                    ? Number(playerRef.current.getDuration())
-                    : 0) || activeDuration;
-                setCurrentTime(safeTime);
-                setProgress(safeTime, resolvedDuration);
-              }}
-              onWaiting={() => setIsBuffering(true)}
-              onPlaying={() => {
-                setIsBuffering(false);
-                setPlaying(true);
-              }}
-              onPause={() => setPlaying(false)}
-              onEnded={() => {
-                if (videoAutoplay && relatedItems.length > 0) {
-                  void playRelated(relatedItems[0]!);
-                  return;
-                }
-                setPlaying(false);
-              }}
-              onError={(e: any, data?: any) => {
-                const code = typeof e === "number" ? e : data?.code;
-                const fallbackMessage =
-                  typeof data?.message === "string"
-                    ? data.message
-                    : typeof e?.message === "string"
-                      ? e.message
-                      : "Unknown player error";
-                const label =
-                  (typeof code === "number" ? YT_ERROR_LABELS[code] : null) ??
-                  (e instanceof Error ? e.message : fallbackMessage);
-                setVideoError(
-                  label.includes("embedded")
-                    ? "This video cannot be embedded (owner disabled it)."
-                    : `Video failed to play: ${label}`
-                );
-                setIsBuffering(false);
-                setPlaying(false);
-              }}
-            />
+      <div className="flex-1 overflow-y-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {videoError ? (
+          <div className="mx-auto mt-4 w-[calc(100%-2rem)] max-w-5xl rounded-xl border border-red-500/30 bg-red-900/80 px-4 py-3 text-sm text-red-200">
+            {videoError}
           </div>
+        ) : null}
 
-          <div className="space-y-3 px-4 py-4 lg:ml-4 lg:w-[min(62vw,980px)]">
-            <h3 className="text-base font-semibold leading-snug md:text-lg">{current.title}</h3>
-
-            <div className="space-y-2">
-              <div className="h-1.5 overflow-hidden rounded-full bg-white/15">
-                <div
-                  className="h-full rounded-full transition-[width] duration-200"
-                  style={{ width: `${progress}%`, backgroundColor: accentStrong }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-xs text-white/55">
-                <span>{formatDuration(Math.floor(currentTime))}</span>
-                <span>{formatDuration(Math.floor(activeDuration))}</span>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
-              <div className="flex min-w-0 items-center gap-3">
-                {video.uploaderAvatarUrl || current.creatorAvatarUrl ? (
-                  <img
-                    src={video.uploaderAvatarUrl || current.creatorAvatarUrl || ""}
-                    alt={video.uploader || current.creator}
-                    className="h-10 w-10 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-sm font-bold">
-                    {channelInitial}
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{video.uploader || current.creator}</p>
+        <div className="sticky top-0 z-20 border-b border-white/10 bg-black/95">
+          <div className="mx-auto w-full max-w-5xl">
+            <div className="relative w-full bg-black" style={{ aspectRatio: "16 / 9" }}>
+              {isBuffering && !videoError ? (
+                <div className="absolute inset-0 z-10 flex items-center justify-center">
+                  <Loader2 className="h-12 w-12 animate-spin text-white/70" />
                 </div>
-              </div>
+              ) : null}
+              <div className="pointer-events-none absolute right-2 top-2 z-20 h-8 w-20 rounded-md bg-black/92" aria-hidden="true" />
 
-              <div className="flex items-center gap-2">
-                <div className="inline-flex items-center gap-1 rounded-full border border-white/20 px-3 py-1 text-xs text-white/80">
-                  <ThumbsUp className="h-3.5 w-3.5" />
-                  <span>{formatLikes(video.likes ?? null)}</span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setCaptionsEnabled((prev) => !prev)}
-                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition ${
-                    captionsEnabled
-                      ? "border-white bg-white text-black"
-                      : "border-white/20 bg-white/5 text-white/75 hover:bg-white/10"
-                  }`}
-                >
-                  <Captions className="h-3.5 w-3.5" />
-                  CC
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setVideoAutoplay(!videoAutoplay)}
-                  className={`rounded-full border px-3 py-1 text-xs transition ${
-                    videoAutoplay
-                      ? "border-white bg-white text-black"
-                      : "border-white/20 bg-white/5 text-white/75 hover:bg-white/10"
-                  }`}
-                >
-                  Auto {videoAutoplay ? "On" : "Off"}
-                </button>
-
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => void addCurrentToFavorites()}
-                  disabled={savingToPlaylist}
-                  aria-label="Add video to playlist"
-                >
-                  {savingToPlaylist ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                </Button>
-
-                <a
-                  href={ytUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center justify-center rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs text-white/80 transition hover:bg-white/10"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              </div>
-            </div>
-
-            {saveMessage ? <p className="text-xs text-white/70">{saveMessage}</p> : null}
-
-            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-              <p
-                className={`break-words whitespace-pre-wrap text-sm text-white/80 ${
-                  showDescription ? "max-h-56 overflow-y-auto pr-1" : "line-clamp-3"
-                }`}
-              >
-                {descriptionText}
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowDescription((prev) => !prev)}
-                className="mt-2 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-white/70 hover:text-white"
-              >
-                {showDescription ? (
-                  <>
-                    <ChevronUp className="h-3.5 w-3.5" />
-                    Show Less
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="h-3.5 w-3.5" />
-                    Show More
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div className="space-y-2 lg:hidden">
-              <h4 className="text-xs font-semibold uppercase tracking-[0.14em] text-white/50">More Videos</h4>
-              {relatedError ? <p className="text-sm text-amber-300">{relatedError}</p> : null}
-              <div className="max-h-[48vh] overflow-y-auto pr-1">
-                <div className="space-y-2">
-                  {relatedItems.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => void playRelated(item)}
-                      className="flex w-full items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-white/20 hover:bg-white/10"
-                      disabled={loadingRelatedId === item.id}
-                    >
-                      <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg">
-                        <img src={item.thumbnail} alt={item.title} className="h-full w-full object-cover" />
-                        {loadingRelatedId === item.id ? (
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                            <Loader2 className="h-4 w-4 animate-spin text-white" />
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 text-sm font-medium">{item.title}</p>
-                        <div className="mt-1 flex items-center gap-2">
-                          {item.creatorAvatarUrl ? (
-                            <img
-                              src={item.creatorAvatarUrl}
-                              alt={item.creator}
-                              className="h-4 w-4 rounded-full object-cover"
-                            />
-                          ) : (
-                            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/15 text-[10px] font-semibold">
-                              {(item.creator || "A").charAt(0).toUpperCase()}
-                            </span>
-                          )}
-                          <p className="line-clamp-1 text-xs text-white/60">{item.creator}</p>
-                        </div>
-                        <p className="mt-1 text-xs text-white/40">{formatDuration(item.duration)}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <ReactPlayer
+                key={`video-${current.id}`}
+                ref={playerRef}
+                src={ytUrl}
+                playing={playing}
+                controls
+                progressInterval={200}
+                width="100%"
+                height="100%"
+                style={{ position: "absolute", inset: 0 }}
+                config={{
+                  youtube: {
+                    playerVars: {
+                      autoplay: 1,
+                      controls: 1,
+                      rel: 0,
+                      modestbranding: 1,
+                      playsinline: 1,
+                      iv_load_policy: 3,
+                      showinfo: 0,
+                      fs: 1,
+                      disablekb: 0,
+                      cc_load_policy: 1,
+                    },
+                  },
+                }}
+                onReady={() => {
+                  setIsBuffering(false);
+                  setVideoError(null);
+                }}
+                onDuration={(value: number) => {
+                  const safeDuration = Number.isFinite(value) && value > 0 ? value : 0;
+                  setDuration(safeDuration);
+                  setProgress(currentTime, safeDuration);
+                }}
+                onProgress={(state: { playedSeconds?: number }) => {
+                  const nextTime = Number(state.playedSeconds);
+                  const safeTime = Number.isFinite(nextTime) ? nextTime : 0;
+                  const resolvedDuration =
+                    (typeof playerRef.current?.getDuration === "function"
+                      ? Number(playerRef.current.getDuration())
+                      : 0) || activeDuration;
+                  setCurrentTime(safeTime);
+                  setProgress(safeTime, resolvedDuration);
+                }}
+                onWaiting={() => setIsBuffering(true)}
+                onPlaying={() => {
+                  setIsBuffering(false);
+                  setPlaying(true);
+                }}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
+                onError={(e: any, data?: any) => {
+                  const code = typeof e === "number" ? e : data?.code;
+                  const fallbackMessage =
+                    typeof data?.message === "string"
+                      ? data.message
+                      : typeof e?.message === "string"
+                        ? e.message
+                        : "Unknown player error";
+                  const label =
+                    (typeof code === "number" ? YT_ERROR_LABELS[code] : null) ??
+                    (e instanceof Error ? e.message : fallbackMessage);
+                  setVideoError(
+                    label.includes("embedded")
+                      ? "This video cannot be embedded (owner disabled it)."
+                      : `Video failed to play: ${label}`
+                  );
+                  setIsBuffering(false);
+                  setPlaying(false);
+                }}
+              />
             </div>
           </div>
         </div>
 
-        <aside className="hidden min-h-0 border-l border-white/10 lg:flex lg:flex-col">
-          <div className="border-b border-white/10 px-4 py-3">
-            <h4 className="text-xs font-semibold uppercase tracking-[0.14em] text-white/50">More Videos</h4>
-            {relatedError ? <p className="mt-2 text-sm text-amber-300">{relatedError}</p> : null}
+        <div className="mx-auto w-full max-w-5xl space-y-4 px-4 py-4 pb-24">
+          <button type="button" className="w-full text-left" onClick={() => setDescriptionOpen(true)}>
+            <h3 className="text-base font-semibold leading-snug md:text-lg">{current.title}</h3>
+          </button>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-1 rounded-full border border-white/20 px-3 py-1 text-xs text-white/80">
+              <ThumbsUp className="h-3.5 w-3.5" />
+              <span>{formatLikes(video.likes ?? null)}</span>
+            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => void addCurrentToFavorites()}
+              disabled={savingToPlaylist}
+              className="h-11 w-11 rounded-full"
+              aria-label="Add video to playlist"
+            >
+              {savingToPlaylist ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            </Button>
           </div>
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
-            {relatedItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => void playRelated(item)}
-                className="flex w-full items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-white/20 hover:bg-white/10"
-                disabled={loadingRelatedId === item.id}
-              >
-                <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg">
-                  <img src={item.thumbnail} alt={item.title} className="h-full w-full object-cover" />
-                  {loadingRelatedId === item.id ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                      <Loader2 className="h-4 w-4 animate-spin text-white" />
-                    </div>
-                  ) : null}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 text-sm font-medium">{item.title}</p>
-                  <div className="mt-1 flex items-center gap-2">
-                    {item.creatorAvatarUrl ? (
-                      <img src={item.creatorAvatarUrl} alt={item.creator} className="h-4 w-4 rounded-full object-cover" />
-                    ) : (
-                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/15 text-[10px] font-semibold">
-                        {(item.creator || "A").charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <p className="line-clamp-1 text-xs text-white/60">{item.creator}</p>
+
+          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+            {video.uploaderAvatarUrl || current.creatorAvatarUrl ? (
+              <img
+                src={video.uploaderAvatarUrl || current.creatorAvatarUrl || ""}
+                alt={channelName}
+                className="h-10 w-10 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-sm font-bold">
+                {channelInitial}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{channelName}</p>
+            </div>
+          </div>
+
+          {saveMessage ? <p className="text-xs text-white/70">{saveMessage}</p> : null}
+
+          <section className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-[0.14em] text-white/55">More Videos</h4>
+            {relatedError ? <p className="text-sm text-amber-300">{relatedError}</p> : null}
+            <div className="space-y-2">
+              {relatedItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => void playRelated(item)}
+                  className="flex w-full items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-white/20 hover:bg-white/10"
+                  disabled={loadingRelatedId === item.id}
+                >
+                  <div className="relative h-14 w-24 shrink-0 overflow-hidden rounded-lg md:h-16 md:w-28">
+                    <img src={item.thumbnail} alt={item.title} className="h-full w-full object-cover" />
+                    {loadingRelatedId === item.id ? (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                        <Loader2 className="h-4 w-4 animate-spin text-white" />
+                      </div>
+                    ) : null}
                   </div>
-                  <p className="mt-1 text-xs text-white/40">{formatDuration(item.duration)}</p>
-                </div>
-              </button>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-sm font-medium">{item.title}</p>
+                    <p className="mt-1 line-clamp-1 text-xs text-white/65">{item.creator}</p>
+                    <p className="mt-1 text-xs text-white/40">{formatDuration(item.duration)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div
+        className={`absolute inset-0 z-[70] transition-opacity duration-300 ${
+          descriptionOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/70"
+          onClick={() => setDescriptionOpen(false)}
+          aria-label="Close description"
+        />
+        <div
+          className={`pointer-events-auto absolute inset-x-0 bottom-0 max-h-[72vh] rounded-t-2xl border-t border-white/15 bg-[#111] transition-transform duration-300 ${
+            descriptionOpen ? "translate-y-0" : "translate-y-full"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <h4 className="text-sm font-semibold uppercase tracking-[0.12em] text-white/85">Description</h4>
+            <Button variant="ghost" size="icon" onClick={() => setDescriptionOpen(false)} aria-label="Close description panel">
+              <X className="h-4 w-4" />
+            </Button>
           </div>
-        </aside>
+          <div className="max-h-[calc(72vh-54px)] overflow-y-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <p className="whitespace-pre-wrap break-words text-sm text-white/80">{descriptionText}</p>
+          </div>
+        </div>
       </div>
     </div>
   );

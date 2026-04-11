@@ -1,4 +1,4 @@
-﻿import { Moon } from "lucide-react";
+import { Clock3 } from "lucide-react";
 import { usePlayerStore } from "@/store/player-store";
 import { Button } from "@/components/ui/button";
 
@@ -10,7 +10,7 @@ export const SleepTimer = () => {
 
   return (
     <div className="flex items-center gap-2">
-      <Moon className="h-4 w-4 text-white/70" />
+      <Clock3 className="h-4 w-4 text-white/70" />
       {options.map((min) => (
         <Button key={min} variant="outline" size="sm" onClick={() => setSleepTimer(min)}>
           {min}m
@@ -25,3 +25,4 @@ export const SleepTimer = () => {
     </div>
   );
 };
+
