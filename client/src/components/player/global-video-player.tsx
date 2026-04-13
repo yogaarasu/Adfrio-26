@@ -25,6 +25,28 @@ const formatLikes = (likes: number | null): string => {
   return String(likes);
 };
 
+const UNKNOWN_VALUE_PATTERN = /^(unknown(\s+(creator|video|title|channel))?|n\/a|none)$/i;
+
+const hasMeaningfulText = (value: string | null | undefined): boolean => {
+  const text = (value ?? "").trim();
+  return text.length > 0 && !UNKNOWN_VALUE_PATTERN.test(text);
+};
+
+const isValidRelatedVideo = (item: MediaItem, currentId: string): boolean => {
+  if (!item?.id || item.id === currentId) return false;
+  if (item.type !== "video") return false;
+  return hasMeaningfulText(item.title) && hasMeaningfulText(item.creator);
+};
+
+const sanitizeRelatedItems = (items: MediaItem[], currentId: string): MediaItem[] => {
+  const byId = new Map<string, MediaItem>();
+  for (const item of items) {
+    if (!isValidRelatedVideo(item, currentId) || byId.has(item.id)) continue;
+    byId.set(item.id, item);
+  }
+  return Array.from(byId.values());
+};
+
 export const GlobalVideoPlayer = () => {
   const current = usePlayerStore((state) => state.current);
   const video = usePlayerStore((state) => state.video);
@@ -53,6 +75,7 @@ export const GlobalVideoPlayer = () => {
   const playerRef = useRef<any | null>(null);
   const titleTriggerRef = useRef<HTMLButtonElement | null>(null);
   const videoFrameRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const shouldOpen = video.active && !!current?.id && current?.type === "video";
 
@@ -104,9 +127,16 @@ export const GlobalVideoPlayer = () => {
     if (isDesktop && frame) {
       const frameRect = frame.getBoundingClientRect();
       nextTop = Math.round(frameRect.top + frameRect.height * 0.5);
-    } else if (trigger) {
-      const rect = trigger.getBoundingClientRect();
-      nextTop = Math.round(rect.top);
+    } else {
+      const frameBottom = frame ? Math.round(frame.getBoundingClientRect().bottom + 8) : null;
+      const titleTop = trigger ? Math.round(trigger.getBoundingClientRect().top) : null;
+      if (frameBottom !== null && titleTop !== null) {
+        nextTop = Math.max(frameBottom, titleTop);
+      } else if (titleTop !== null) {
+        nextTop = titleTop;
+      } else if (frameBottom !== null) {
+        nextTop = frameBottom;
+      }
     }
 
     const minTop = 64;
@@ -127,23 +157,29 @@ export const GlobalVideoPlayer = () => {
     if (!descriptionOpen) return;
     syncDescriptionTop();
     const onResize = () => syncDescriptionTop();
+    const onScroll = () => syncDescriptionTop();
+    const scrollHost = scrollContainerRef.current;
     window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    scrollHost?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onScroll);
+      scrollHost?.removeEventListener("scroll", onScroll);
     };
   }, [descriptionOpen, syncDescriptionTop]);
 
   const hydrateVideoSession = useCallback(
     async (item: MediaItem) => {
       const stream = await mediaApi.streams(item.id);
-      let related = (stream.related ?? []).filter((entry) => entry.id && entry.id !== item.id);
+      let related = sanitizeRelatedItems(stream.related ?? [], item.id);
 
       if (related.length < 8) {
         try {
-          const searchFallback = await mediaApi.search(`${item.title} ${item.creator}`, "video");
+          const fallbackQuery = hasMeaningfulText(item.creator) ? `${item.title} ${item.creator}` : item.title;
+          const searchFallback = await mediaApi.search(fallbackQuery, "video");
           const merged = [...related, ...(searchFallback.items ?? [])];
-          const deduped = Array.from(new Map(merged.map((entry) => [entry.id, entry])).values());
-          related = deduped.filter((entry) => entry.id && entry.id !== item.id).slice(0, 24);
+          related = sanitizeRelatedItems(merged, item.id).slice(0, 24);
         } catch {
           // ignore fallback search failure
         }
@@ -238,7 +274,7 @@ export const GlobalVideoPlayer = () => {
       setPlaying(false);
       return;
     }
-    const next = video.related.find((item) => item.id && item.id !== current?.id);
+    const next = video.related.find((item) => !!current?.id && isValidRelatedVideo(item, current.id));
     if (!next) {
       setPlaying(false);
       return;
@@ -249,12 +285,12 @@ export const GlobalVideoPlayer = () => {
   if (!isMounted || !current || current.type !== "video") return null;
 
   const ytUrl = `https://www.youtube.com/watch?v=${current.id}`;
-  const relatedItems = video.related.slice(0, 18);
+  const relatedItems = sanitizeRelatedItems(video.related, current.id).slice(0, 18);
   const activeDuration = duration > 0 ? duration : Number(current.duration ?? 0);
   const channelName =
     [video.uploader, current.creator, relatedItems[0]?.creator]
       .map((entry) => (entry ?? "").trim())
-      .find((entry) => entry.length > 0) ?? "YouTube";
+      .find((entry) => hasMeaningfulText(entry)) ?? "YouTube";
   const channelAvatar =
     video.uploaderAvatarUrl ||
     current.creatorAvatarUrl ||
@@ -288,7 +324,10 @@ export const GlobalVideoPlayer = () => {
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+      >
         {videoError ? (
           <div className="mx-auto mt-4 w-[calc(100%-2rem)] max-w-[1400px] rounded-xl border border-red-500/30 bg-red-900/80 px-4 py-3 text-sm text-red-200">
             {videoError}
@@ -297,92 +336,93 @@ export const GlobalVideoPlayer = () => {
 
         <div className="mx-auto w-full max-w-[1400px] px-4 py-4 pb-24">
           <div className="lg:grid lg:grid-cols-[minmax(0,4fr)_minmax(0,1fr)] lg:gap-6">
-            <section className="space-y-4">
-              <div
-                ref={videoFrameRef}
-                className="relative w-full overflow-hidden rounded-xl border border-white/10 bg-black"
-                style={{ aspectRatio: "16 / 9" }}
-              >
-                {isBuffering && !videoError ? (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center">
-                    <Loader2 className="h-12 w-12 animate-spin text-white/70" />
-                  </div>
-                ) : null}
-                <div className="pointer-events-none absolute right-2 top-2 z-20 h-8 w-20 rounded-md bg-black/92" aria-hidden="true" />
+            <div
+              ref={videoFrameRef}
+              className="sticky top-0 z-20 w-full overflow-hidden rounded-xl border border-white/10 bg-black lg:relative lg:top-auto lg:col-start-1 lg:row-start-1"
+              style={{ aspectRatio: "16 / 9" }}
+            >
+              {isBuffering && !videoError ? (
+                <div className="absolute inset-0 z-10 flex items-center justify-center">
+                  <Loader2 className="h-12 w-12 animate-spin text-white/70" />
+                </div>
+              ) : null}
+              <div className="pointer-events-none absolute right-2 top-2 z-20 h-8 w-20 rounded-md bg-black/92" aria-hidden="true" />
 
-                <ReactPlayer
-                  key={`video-${current.id}`}
-                  ref={playerRef}
-                  src={ytUrl}
-                  playing={playing}
-                  controls
-                  progressInterval={200}
-                  width="100%"
-                  height="100%"
-                  style={{ position: "absolute", inset: 0 }}
-                  config={{
-                    youtube: {
-                      playerVars: {
-                        autoplay: 1,
-                        controls: 1,
-                        rel: 0,
-                        modestbranding: 1,
-                        playsinline: 1,
-                        iv_load_policy: 3,
-                        showinfo: 0,
-                        fs: 1,
-                        disablekb: 0,
-                        cc_load_policy: 1,
-                      },
+              <ReactPlayer
+                key={`video-${current.id}`}
+                ref={playerRef}
+                src={ytUrl}
+                playing={playing}
+                controls
+                progressInterval={200}
+                width="100%"
+                height="100%"
+                style={{ position: "absolute", inset: 0 }}
+                config={{
+                  youtube: {
+                    playerVars: {
+                      autoplay: 1,
+                      controls: 1,
+                      rel: 0,
+                      modestbranding: 1,
+                      playsinline: 1,
+                      iv_load_policy: 3,
+                      showinfo: 0,
+                      fs: 1,
+                      disablekb: 0,
+                      cc_load_policy: 1,
                     },
-                  }}
-                  onReady={() => {
-                    setIsBuffering(false);
-                    setVideoError(null);
-                  }}
-                  onDuration={(value: number) => {
-                    const safeDuration = Number.isFinite(value) && value > 0 ? value : 0;
-                    setDuration(safeDuration);
-                    setProgress(currentTime, safeDuration);
-                  }}
-                  onProgress={(state: { playedSeconds?: number }) => {
-                    const nextTime = Number(state.playedSeconds);
-                    const safeTime = Number.isFinite(nextTime) ? nextTime : 0;
-                    const resolvedDuration =
-                      (typeof playerRef.current?.getDuration === "function"
-                        ? Number(playerRef.current.getDuration())
-                        : 0) || activeDuration;
-                    setCurrentTime(safeTime);
-                    setProgress(safeTime, resolvedDuration);
-                  }}
-                  onWaiting={() => setIsBuffering(true)}
-                  onPlaying={() => {
-                    setIsBuffering(false);
-                    setPlaying(true);
-                  }}
-                  onPause={() => setPlaying(false)}
-                  onEnded={onVideoEnded}
-                  onError={(e: any, data?: any) => {
-                    const code = typeof e === "number" ? e : data?.code;
-                    const fallbackMessage =
-                      typeof data?.message === "string"
-                        ? data.message
-                        : typeof e?.message === "string"
-                          ? e.message
-                          : "Unknown player error";
-                    const label =
-                      (typeof code === "number" ? YT_ERROR_LABELS[code] : null) ??
-                      (e instanceof Error ? e.message : fallbackMessage);
-                    setVideoError(
-                      label.includes("embedded")
-                        ? "This video cannot be embedded (owner disabled it)."
-                        : `Video failed to play: ${label}`
-                    );
-                    setIsBuffering(false);
-                    setPlaying(false);
-                  }}
-                />
-              </div>
+                  },
+                }}
+                onReady={() => {
+                  setIsBuffering(false);
+                  setVideoError(null);
+                }}
+                onDuration={(value: number) => {
+                  const safeDuration = Number.isFinite(value) && value > 0 ? value : 0;
+                  setDuration(safeDuration);
+                  setProgress(currentTime, safeDuration);
+                }}
+                onProgress={(state: { playedSeconds?: number }) => {
+                  const nextTime = Number(state.playedSeconds);
+                  const safeTime = Number.isFinite(nextTime) ? nextTime : 0;
+                  const resolvedDuration =
+                    (typeof playerRef.current?.getDuration === "function"
+                      ? Number(playerRef.current.getDuration())
+                      : 0) || activeDuration;
+                  setCurrentTime(safeTime);
+                  setProgress(safeTime, resolvedDuration);
+                }}
+                onWaiting={() => setIsBuffering(true)}
+                onPlaying={() => {
+                  setIsBuffering(false);
+                  setPlaying(true);
+                }}
+                onPause={() => setPlaying(false)}
+                onEnded={onVideoEnded}
+                onError={(e: any, data?: any) => {
+                  const code = typeof e === "number" ? e : data?.code;
+                  const fallbackMessage =
+                    typeof data?.message === "string"
+                      ? data.message
+                      : typeof e?.message === "string"
+                        ? e.message
+                        : "Unknown player error";
+                  const label =
+                    (typeof code === "number" ? YT_ERROR_LABELS[code] : null) ??
+                    (e instanceof Error ? e.message : fallbackMessage);
+                  setVideoError(
+                    label.includes("embedded")
+                      ? "This video cannot be embedded (owner disabled it)."
+                      : `Video failed to play: ${label}`
+                  );
+                  setIsBuffering(false);
+                  setPlaying(false);
+                }}
+              />
+            </div>
+
+            <section className="mt-4 space-y-4 lg:mt-0 lg:col-start-1 lg:row-start-2">
 
               <button
                 ref={titleTriggerRef}
@@ -442,7 +482,7 @@ export const GlobalVideoPlayer = () => {
               {saveMessage ? <p className="text-xs text-white/70">{saveMessage}</p> : null}
             </section>
 
-            <aside className="mt-5 space-y-2 lg:mt-0 lg:max-h-[calc(100vh-8.5rem)] lg:overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <aside className="mt-5 space-y-2 lg:col-start-2 lg:row-span-2 lg:mt-0 lg:max-h-[calc(100vh-8.5rem)] lg:overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {relatedError ? <p className="text-sm text-amber-300">{relatedError}</p> : null}
               <div className="space-y-2">
                 {relatedItems.map((item) => (
