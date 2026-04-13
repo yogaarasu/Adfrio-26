@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, Clock3, Loader2, Pause, Play, Plus, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { accentColorFromSeed } from "@/lib/accent-color";
 import { formatDuration } from "@/lib/utils";
 import { playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
@@ -18,6 +19,8 @@ export const NowPlayingPage = () => {
   const sleepUntil = usePlayerStore((state) => state.sleepUntil);
   const playAudio = usePlayerStore((state) => state.playAudio);
   const setPlaying = usePlayerStore((state) => state.setPlaying);
+  const setProgress = usePlayerStore((state) => state.setProgress);
+  const requestSeek = usePlayerStore((state) => state.requestSeek);
   const setSleepTimer = usePlayerStore((state) => state.setSleepTimer);
   const openVideoOverlay = usePlayerStore((state) => state.openVideoOverlay);
 
@@ -27,6 +30,12 @@ export const NowPlayingPage = () => {
   const [isClosing, setIsClosing] = useState(false);
   const [isOpening, setIsOpening] = useState(false);
   const [showTimerMenu, setShowTimerMenu] = useState(false);
+  const [displayTime, setDisplayTime] = useState(0);
+  const rafRef = useRef<number | null>(null);
+  const lastSyncTimeRef = useRef(0);
+  const lastSyncAtRef = useRef(0);
+  const progressTrackRef = useRef<HTMLDivElement | null>(null);
+  const seekPointerIdRef = useRef<number | null>(null);
 
   const jump = useCallback(
     (dir: -1 | 1) => {
@@ -99,6 +108,57 @@ export const NowPlayingPage = () => {
     return () => window.cancelAnimationFrame(raf);
   }, []);
 
+  useEffect(
+    () => () => {
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    },
+    []
+  );
+
+  const resolvedDuration = duration > 0 ? duration : Number(current?.duration || 0);
+
+  useEffect(() => {
+    lastSyncTimeRef.current = currentTime;
+    lastSyncAtRef.current = performance.now();
+    setDisplayTime(currentTime);
+  }, [current?.id, currentTime]);
+
+  useEffect(() => {
+    if (!playing || !current || !audio) {
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      setDisplayTime(currentTime);
+      lastSyncTimeRef.current = currentTime;
+      lastSyncAtRef.current = performance.now();
+      return;
+    }
+
+    const tick = (now: number) => {
+      const elapsed = Math.max(0, (now - lastSyncAtRef.current) / 1000);
+      const maxTime = resolvedDuration > 0 ? resolvedDuration : Number.MAX_SAFE_INTEGER;
+      const nextTime = Math.min(maxTime, lastSyncTimeRef.current + elapsed);
+      setDisplayTime(nextTime);
+      rafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    if (rafRef.current !== null) {
+      window.cancelAnimationFrame(rafRef.current);
+    }
+    rafRef.current = window.requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [audio, current?.id, currentTime, playing, resolvedDuration]);
+
   if (!current || !audio) {
     return (
       <section className="mx-auto max-w-xl space-y-4">
@@ -122,13 +182,28 @@ export const NowPlayingPage = () => {
     );
   }
 
-  const activeDuration = duration > 0 ? duration : Number(current.duration || 0);
-  const progress = activeDuration > 0 ? Math.min(100, (currentTime / activeDuration) * 100) : 0;
+  const activeDuration = resolvedDuration;
+  const progress = activeDuration > 0 ? Math.min(100, (displayTime / activeDuration) * 100) : 0;
   const sleepMinutesLeft = sleepUntil ? Math.max(0, Math.round((sleepUntil - Date.now()) / 60000)) : null;
+  const accentSeed = `${current.id}-${current.creator}-${current.title}`;
+  const accentStrong = accentColorFromSeed(accentSeed, 78, 57, 1);
+  const commitSeekAtClientX = useCallback(
+    (clientX: number) => {
+      const track = progressTrackRef.current;
+      if (!track || !activeDuration) return;
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(rect.width, 1)));
+      const nextTime = ratio * activeDuration;
+      setDisplayTime(nextTime);
+      setProgress(nextTime, activeDuration);
+      requestSeek(nextTime);
+    },
+    [activeDuration, requestSeek, setProgress]
+  );
 
   return (
     <section
-      className={`mx-auto max-w-2xl space-y-5 pb-24 transition-all duration-300 ${
+      className={`mx-auto max-w-2xl space-y-5 pb-0 transition-all duration-300 ${
         isClosing || !isOpening ? "translate-y-full opacity-0" : "translate-y-0 opacity-100"
       }`}
     >
@@ -163,14 +238,59 @@ export const NowPlayingPage = () => {
         </div>
 
         <div className="mt-5 space-y-2">
-          <div className="h-1.5 w-full rounded-full bg-white/20">
+          <div
+            ref={progressTrackRef}
+            className="group relative h-1 w-full cursor-pointer rounded-full bg-white/20"
+            role="slider"
+            aria-label="Seek"
+            aria-valuemin={0}
+            aria-valuemax={Math.max(1, Math.round(activeDuration))}
+            aria-valuenow={Math.round(displayTime)}
+            tabIndex={0}
+            onPointerDown={(event) => {
+              seekPointerIdRef.current = event.pointerId;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              commitSeekAtClientX(event.clientX);
+            }}
+            onPointerMove={(event) => {
+              if (seekPointerIdRef.current !== event.pointerId) return;
+              commitSeekAtClientX(event.clientX);
+            }}
+            onPointerUp={(event) => {
+              if (seekPointerIdRef.current !== event.pointerId) return;
+              seekPointerIdRef.current = null;
+            }}
+            onPointerCancel={(event) => {
+              if (seekPointerIdRef.current !== event.pointerId) return;
+              seekPointerIdRef.current = null;
+            }}
+            onKeyDown={(event) => {
+              if (!activeDuration) return;
+              if (event.key === "ArrowRight") {
+                event.preventDefault();
+                const next = Math.min(activeDuration, displayTime + 10);
+                setDisplayTime(next);
+                setProgress(next, activeDuration);
+                requestSeek(next);
+              }
+              if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                const next = Math.max(0, displayTime - 10);
+                setDisplayTime(next);
+                setProgress(next, activeDuration);
+                requestSeek(next);
+              }
+            }}
+          >
             <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-300"
-              style={{ width: `${progress}%` }}
-            />
+              className="relative h-full rounded-full"
+              style={{ width: `${progress}%`, backgroundColor: accentStrong }}
+            >
+              <span className="absolute right-0 top-1/2 h-2 w-2 -translate-y-1/2 translate-x-1 rounded-full bg-white opacity-0 transition-opacity group-hover:opacity-100" />
+            </div>
           </div>
           <div className="flex items-center justify-between text-xs text-white/60">
-            <span>{formatDuration(Math.floor(currentTime))}</span>
+            <span>{formatDuration(Math.floor(displayTime))}</span>
             <span>{formatDuration(Math.floor(activeDuration))}</span>
           </div>
         </div>

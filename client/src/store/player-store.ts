@@ -45,6 +45,7 @@ type PlayerState = {
   volume: number;
   sleepUntil: number | null;
   audioError: string | null;
+  seekRequestTime: number | null;
   setQueue: (queue: MediaItem[]) => void;
   playAudio: (media: MediaItem, source: AudioSource, queue?: MediaItem[]) => void;
   playVideo: (media: MediaItem, sources: VideoSource[], extras?: MediaItem[] | VideoExtras) => void;
@@ -56,6 +57,8 @@ type PlayerState = {
   setProgress: (currentTime: number, duration: number) => void;
   setVolume: (volume: number) => void;
   setSleepTimer: (minutes: number | null) => void;
+  requestSeek: (seconds: number) => void;
+  clearSeekRequest: () => void;
   seekBy: (seconds: number, element: HTMLMediaElement | null) => void;
   clearVideo: () => void;
   setAudioError: (error: string | null) => void;
@@ -88,6 +91,7 @@ export const usePlayerStore = create<PlayerState>()(
       volume: 1,
       sleepUntil: null,
       audioError: null,
+      seekRequestTime: null,
 
       setQueue: (queue) => set({ queue }),
 
@@ -101,6 +105,7 @@ export const usePlayerStore = create<PlayerState>()(
           currentTime: 0,
           duration: 0,
           audioError: null,
+          seekRequestTime: null,
         });
       },
 
@@ -113,6 +118,7 @@ export const usePlayerStore = create<PlayerState>()(
           playing: true,
           currentTime: 0,
           duration: 0,
+          seekRequestTime: null,
           video: {
             active: true,
             title: media.title,
@@ -213,6 +219,18 @@ export const usePlayerStore = create<PlayerState>()(
           set({ playing: false, sleepUntil: null });
         }, minutes * 60 * 1000);
       },
+
+      requestSeek: (seconds) =>
+        set((state) => {
+          const duration = Number(state.duration) || Number(state.current?.duration ?? 0) || 0;
+          const bounded =
+            duration > 0
+              ? Math.max(0, Math.min(Number(seconds) || 0, duration))
+              : Math.max(0, Number(seconds) || 0);
+          return { seekRequestTime: bounded };
+        }),
+
+      clearSeekRequest: () => set({ seekRequestTime: null }),
 
       seekBy: (seconds, element) => {
         if (!element) return;

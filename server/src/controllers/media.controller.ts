@@ -42,25 +42,26 @@ const streamSchema = z.object({
 });
 
 const HOME_MUSIC_TEMPLATES = [
-  "{language} latest hit songs {year}",
-  "{language} trending songs now",
-  "new {language} songs this week",
-  "viral {language} songs",
-  "top {language} chart songs",
-  "{language} melody hits playlist",
+  "top hit {language} songs {year}",
+  "most viewed {language} songs {year}",
+  "{language} chartbuster songs latest",
+  "best of {language} songs this week",
+  "{language} top playlist hits",
+  "popular {language} songs official audio",
 ];
 
 const HOME_VIDEO_TEMPLATES = [
-  "youtube trending now {language}",
-  "latest viral {language} videos",
-  "hit trending videos {language} {year}",
-  "{language} popular clips now",
-  "youtube hottest {language} uploads",
-  "must watch {language} videos",
+  "top hit {language} videos {year}",
+  "most watched {language} entertainment videos",
+  "popular {language} videos this week",
+  "{language} best videos now",
+  "youtube most viewed {language} videos",
+  "must watch {language} top videos",
 ];
 
 const MAX_HOME_PAGES = 240;
 const MAX_SEARCH_PAGES = 160;
+const HOME_FALLBACK_MIN_ITEMS = 12;
 
 const SEARCH_MUSIC_VARIANTS = [
   "{query}",
@@ -429,7 +430,7 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<Response
 
     let combined = [...primary.items];
 
-    if (combined.length < 20) {
+    if (combined.length < HOME_FALLBACK_MIN_ITEMS) {
       const fallbackQuery = buildHomeQuery(mode, language, pageIndex + 3, seed + 5);
       publishProgress(75, `Expanding feed with "${fallbackQuery}"`);
       const fallback = await searchYoutube(fallbackQuery, mode);

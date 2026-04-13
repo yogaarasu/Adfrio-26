@@ -42,9 +42,11 @@ export const GlobalAudioPlayer = () => {
   const playerRef = useRef<any | null>(null);
   const seekLockUntilRef = useRef(0);
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backgroundAdvanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastSyncTimeRef = useRef(0);
   const lastSyncAtRef = useRef(0);
+  const autoAdvanceKeyRef = useRef<string>("");
 
   const current = usePlayerStore((s) => s.current);
   const audio = usePlayerStore((s) => s.audio);
@@ -55,6 +57,7 @@ export const GlobalAudioPlayer = () => {
   const duration = usePlayerStore((s) => s.duration);
   const queue = usePlayerStore((s) => s.queue);
   const audioError = usePlayerStore((s) => s.audioError);
+  const seekRequestTime = usePlayerStore((s) => s.seekRequestTime);
 
   const setPlaying = usePlayerStore((s) => s.setPlaying);
   const setProgress = usePlayerStore((s) => s.setProgress);
@@ -62,6 +65,7 @@ export const GlobalAudioPlayer = () => {
   const playAudio = usePlayerStore((s) => s.playAudio);
   const setAudioError = usePlayerStore((s) => s.setAudioError);
   const openVideoOverlay = usePlayerStore((s) => s.openVideoOverlay);
+  const clearSeekRequest = usePlayerStore((s) => s.clearSeekRequest);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -71,6 +75,13 @@ export const GlobalAudioPlayer = () => {
     if (loadingTimeoutRef.current) {
       clearTimeout(loadingTimeoutRef.current);
       loadingTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearBackgroundAdvanceTimeout = useCallback(() => {
+    if (backgroundAdvanceTimeoutRef.current) {
+      clearTimeout(backgroundAdvanceTimeoutRef.current);
+      backgroundAdvanceTimeoutRef.current = null;
     }
   }, []);
 
@@ -100,18 +111,23 @@ export const GlobalAudioPlayer = () => {
   useEffect(
     () => () => {
       clearLoadingTimeout();
+      clearBackgroundAdvanceTimeout();
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
       }
     },
-    [clearLoadingTimeout]
+    [clearBackgroundAdvanceTimeout, clearLoadingTimeout]
   );
 
   useEffect(() => {
+    const now = performance.now();
     lastSyncTimeRef.current = currentTime;
-    lastSyncAtRef.current = performance.now();
-    setDisplayTime(currentTime);
-  }, [current?.id, currentTime]);
+    lastSyncAtRef.current = now;
+    setDisplayTime((prev) => {
+      if (!playing) return currentTime;
+      return Math.abs(prev - currentTime) > 0.35 ? currentTime : prev;
+    });
+  }, [current?.id, currentTime, playing]);
 
   const interpolatedDuration = duration > 0 ? duration : Number(current?.duration ?? 0);
 
@@ -211,6 +227,9 @@ export const GlobalAudioPlayer = () => {
       seekLockUntilRef.current = Date.now() + 700;
       if (showLoading && playing) setLoadingWithGuard(true);
       setProgress(bounded, readDuration() || duration || 0);
+      setDisplayTime(bounded);
+      lastSyncTimeRef.current = bounded;
+      lastSyncAtRef.current = performance.now();
 
       if (typeof player.seekTo === "function") {
         player.seekTo(bounded, "seconds");
@@ -245,6 +264,15 @@ export const GlobalAudioPlayer = () => {
     setIsMuted((value) => !value);
   }, []);
 
+  useEffect(() => {
+    if (seekRequestTime === null || !current || !audio) return;
+    setDisplayTime(seekRequestTime);
+    lastSyncTimeRef.current = seekRequestTime;
+    lastSyncAtRef.current = performance.now();
+    seekToSeconds(seekRequestTime, false);
+    clearSeekRequest();
+  }, [audio, clearSeekRequest, current, seekRequestTime, seekToSeconds]);
+
   useMediaSession({
     onSeekBy,
     onNext: () => void jump(1),
@@ -253,17 +281,74 @@ export const GlobalAudioPlayer = () => {
     onSeekTo,
   });
 
+  const autoAdvanceDuration = duration > 0 ? duration : Number(current?.duration ?? 0);
+
+  useEffect(() => {
+    autoAdvanceKeyRef.current = "";
+  }, [current?.id]);
+
+  useEffect(() => {
+    if (!current || !audio) return;
+    if (!playing || queue.length < 2 || autoAdvanceDuration <= 0) return;
+    const remaining = autoAdvanceDuration - currentTime;
+    if (remaining > 0.35) {
+      autoAdvanceKeyRef.current = "";
+      return;
+    }
+
+    const key = `${current.id}-${Math.round(autoAdvanceDuration)}`;
+    if (autoAdvanceKeyRef.current === key) return;
+    autoAdvanceKeyRef.current = key;
+    setProgress(autoAdvanceDuration, autoAdvanceDuration);
+    jump(1);
+  }, [audio, autoAdvanceDuration, current, currentTime, jump, playing, queue.length, setProgress]);
+
+  useEffect(() => {
+    clearBackgroundAdvanceTimeout();
+    if (!current || !audio) return;
+    if (!playing || queue.length < 2 || autoAdvanceDuration <= 0) return;
+
+    const remainingMs = Math.max(0, (autoAdvanceDuration - currentTime) * 1000);
+    if (remainingMs <= 0) return;
+
+    backgroundAdvanceTimeoutRef.current = setTimeout(() => {
+      if (autoAdvanceKeyRef.current.startsWith(`${current.id}-`)) return;
+      const state = usePlayerStore.getState();
+      if (!state.playing) return;
+      if (!state.current || state.current.id !== current.id) return;
+      if (state.queue.length < 2) return;
+
+      const finalDuration = Number(state.duration || current.duration || 0);
+      autoAdvanceKeyRef.current = `${current.id}-${Math.round(finalDuration)}`;
+      setProgress(finalDuration, finalDuration);
+      jump(1);
+    }, Math.min(remainingMs + 700, 10 * 60 * 1000));
+
+    return clearBackgroundAdvanceTimeout;
+  }, [
+    audio,
+    autoAdvanceDuration,
+    clearBackgroundAdvanceTimeout,
+    current,
+    currentTime,
+    jump,
+    playing,
+    queue.length,
+    setProgress,
+  ]);
+
   if (!current || !audio) return null;
 
-  const progress = duration > 0 ? Math.min(100, (displayTime / duration) * 100) : 0;
+  const activeDuration = duration > 0 ? duration : Number(current.duration ?? 0);
+  const progress = activeDuration > 0 ? Math.min(100, (displayTime / activeDuration) * 100) : 0;
   const sourceUrl = audio.url;
   const isYouTubeSource = /(?:youtube\.com|youtu\.be)/i.test(sourceUrl);
   const fallbackYoutubeUrl = `https://www.youtube.com/watch?v=${current.id}`;
   const canReopenVideo = current.type === "video" && !video.active;
-  const activeDuration = duration > 0 ? duration : Number(current.duration ?? 0);
   const accentSeed = `${current.id}-${current.creator}-${current.title}`;
   const accentStrong = accentColorFromSeed(accentSeed, 78, 57, 1);
   const hideMiniBar = location.pathname === "/now-playing";
+  const volumeFill = Math.round((isMuted ? 0 : volume) * 100);
 
   return (
     <>
@@ -290,7 +375,7 @@ export const GlobalAudioPlayer = () => {
           muted={isMuted}
           width="1px"
           height="1px"
-          progressInterval={200}
+          progressInterval={100}
           config={
             isYouTubeSource
               ? {
@@ -345,6 +430,7 @@ export const GlobalAudioPlayer = () => {
           onEnded={() => {
             const endAt = readCurrentTime();
             const finalDuration = endAt > 0 ? endAt : readDuration() || Number(current.duration) || duration;
+            autoAdvanceKeyRef.current = `${current.id}-${Math.round(finalDuration)}`;
             setProgress(finalDuration, finalDuration);
             jump(1);
           }}
@@ -387,7 +473,7 @@ export const GlobalAudioPlayer = () => {
           aria-label="Audio player"
         >
           <div
-            className="group mb-3 h-1.5 w-full cursor-pointer rounded-full bg-white/15"
+            className="group mb-3 h-1 w-full cursor-pointer rounded-full bg-white/15"
             onClick={(e) => {
               e.stopPropagation();
               if (!activeDuration) return;
@@ -413,10 +499,10 @@ export const GlobalAudioPlayer = () => {
             }}
           >
             <div
-              className="relative h-full rounded-full transition-all duration-200"
+              className="relative h-full rounded-full"
               style={{ width: `${progress}%`, backgroundColor: accentStrong }}
             >
-              <div className="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1.5 rounded-full bg-white opacity-0 transition-opacity group-hover:opacity-100" />
+              <div className="absolute right-0 top-1/2 h-2.5 w-2.5 -translate-y-1/2 translate-x-1 rounded-full bg-white opacity-0 transition-opacity group-hover:opacity-100" />
             </div>
           </div>
 
@@ -467,6 +553,16 @@ export const GlobalAudioPlayer = () => {
             </button>
 
             <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onSeekBy(-30)}
+                aria-label="Rewind 30 seconds"
+                className="hidden lg:inline-flex"
+              >
+                -30s
+              </Button>
+
               <Button variant="ghost" size="icon" onClick={() => jump(-1)} aria-label="Previous track">
                 <SkipBack className="h-4 w-4" />
               </Button>
@@ -512,9 +608,22 @@ export const GlobalAudioPlayer = () => {
               <Button variant="ghost" size="icon" onClick={() => jump(1)} aria-label="Next track">
                 <SkipForward className="h-4 w-4" />
               </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onSeekBy(30)}
+                aria-label="Skip 30 seconds"
+                className="hidden lg:inline-flex"
+              >
+                +30s
+              </Button>
             </div>
 
             <div className="hidden items-center gap-2 md:flex" onClick={(e) => e.stopPropagation()}>
+              <span className="hidden text-xs text-white/50 lg:inline">
+                {formatDuration(Math.floor(displayTime))} / {formatDuration(Math.floor(activeDuration))}
+              </span>
               <button
                 onClick={onToggleMute}
                 aria-label={isMuted ? "Unmute" : "Mute"}
@@ -534,8 +643,11 @@ export const GlobalAudioPlayer = () => {
                   setVolume(val);
                   if (val > 0 && isMuted) setIsMuted(false);
                 }}
-                className="w-24"
-                style={{ accentColor: accentStrong }}
+                className="h-1 w-24 appearance-none rounded-full bg-white/20 md:w-28 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-0 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0"
+                style={{
+                  accentColor: accentStrong,
+                  background: `linear-gradient(to right, ${accentStrong} 0%, ${accentStrong} ${volumeFill}%, rgba(255,255,255,0.2) ${volumeFill}%, rgba(255,255,255,0.2) 100%)`,
+                }}
                 aria-label="Volume"
               />
             </div>

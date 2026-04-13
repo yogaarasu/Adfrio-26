@@ -8,7 +8,7 @@ import { MediaCard } from "@/components/media/media-card";
 import { Button } from "@/components/ui/button";
 import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
-import { filterStrictSongs, dedupeMediaItems } from "@/lib/media-filters";
+import { filterSafeVideos, filterStrictSongs, dedupeMediaItems } from "@/lib/media-filters";
 import type { MediaItem } from "@/types/media";
 
 type SearchResponse = {
@@ -24,7 +24,40 @@ export const HomePage = () => {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
   const [realtimeProgressText, setRealtimeProgressText] = useState<string | null>(null);
-  const seenSongIdsRef = useRef<Set<string>>(new Set());
+  const [cachedFeedItems, setCachedFeedItems] = useState<MediaItem[]>([]);
+  const [refreshExcludeIds, setRefreshExcludeIds] = useState<string[]>([]);
+  const historicalSeenSongIdsRef = useRef<Set<string>>(
+    new Set(
+      (() => {
+        if (typeof window === "undefined") return [];
+        try {
+          const raw = sessionStorage.getItem("adfrio_seen_song_ids");
+          if (!raw) return [];
+          const parsed = JSON.parse(raw) as string[];
+          return parsed.slice(-1200);
+        } catch {
+          return [];
+        }
+      })()
+    )
+  );
+  const historicalSeenVideoIdsRef = useRef<Set<string>>(
+    new Set(
+      (() => {
+        if (typeof window === "undefined") return [];
+        try {
+          const raw = sessionStorage.getItem("adfrio_seen_video_ids");
+          if (!raw) return [];
+          const parsed = JSON.parse(raw) as string[];
+          return parsed.slice(-1200);
+        } catch {
+          return [];
+        }
+      })()
+    )
+  );
+  const excludedSongIdsRef = useRef<Set<string>>(new Set(historicalSeenSongIdsRef.current));
+  const excludedVideoIdsRef = useRef<Set<string>>(new Set(historicalSeenVideoIdsRef.current));
   const progressClearTimerRef = useRef<number | null>(null);
   const { connectionId, lastMessage } = useRealtimeConnection();
 
@@ -33,6 +66,27 @@ export const HomePage = () => {
   const updateVideoSession = usePlayerStore((state) => state.updateVideoSession);
   const current = usePlayerStore((state) => state.current);
   const playing = usePlayerStore((state) => state.playing);
+  const cacheKey = `adfrio_home_cache_${mode}_${language}`;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = sessionStorage.getItem(cacheKey);
+      if (!raw) {
+        setCachedFeedItems([]);
+        return;
+      }
+      const parsed = JSON.parse(raw) as { ts: number; items: MediaItem[] };
+      const age = Date.now() - Number(parsed?.ts ?? 0);
+      if (!Array.isArray(parsed?.items) || age > 8 * 60 * 1000) {
+        setCachedFeedItems([]);
+        return;
+      }
+      setCachedFeedItems(dedupeMediaItems(parsed.items));
+    } catch {
+      setCachedFeedItems([]);
+    }
+  }, [cacheKey]);
 
   useEffect(() => {
     setRealtimeProgressText(null);
@@ -40,7 +94,21 @@ export const HomePage = () => {
       window.clearTimeout(progressClearTimerRef.current);
       progressClearTimerRef.current = null;
     }
-  }, [language, mode, refreshSeed]);
+    if (mode === "music") {
+      excludedSongIdsRef.current = new Set([
+        ...historicalSeenSongIdsRef.current,
+        ...refreshExcludeIds,
+      ]);
+      excludedVideoIdsRef.current = new Set();
+      return;
+    }
+
+    excludedVideoIdsRef.current = new Set([
+      ...historicalSeenVideoIdsRef.current,
+      ...refreshExcludeIds,
+    ]);
+    excludedSongIdsRef.current = new Set();
+  }, [language, mode, refreshExcludeIds, refreshSeed]);
 
   useEffect(() => {
     if (!lastMessage || lastMessage.type !== "home-feed:progress") return;
@@ -81,6 +149,10 @@ export const HomePage = () => {
         realtimeId: connectionId ?? undefined,
       }),
     getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined,
+    staleTime: 45_000,
+    gcTime: 10 * 60 * 1000,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = homeFeed;
 
@@ -88,24 +160,18 @@ export const HomePage = () => {
     const merged = dedupeMediaItems((homeFeed.data?.pages ?? []).flatMap((page) => page.items));
     if (mode === "music") {
       const strictSongs = filterStrictSongs(merged);
-      const unseenSongs = strictSongs.filter((item) => !seenSongIdsRef.current.has(item.id));
-      const songsPool = unseenSongs.length >= 30 ? unseenSongs : strictSongs;
-      return songsPool;
+      const unseen = strictSongs.filter((item) => !excludedSongIdsRef.current.has(item.id));
+      if (unseen.length >= 10) return unseen;
+      const seenFallback = strictSongs.filter((item) => excludedSongIdsRef.current.has(item.id));
+      return dedupeMediaItems([...unseen, ...seenFallback]);
     }
-    return merged;
-  }, [homeFeed.data?.pages, mode]);
 
-  useEffect(() => {
-    if (mode !== "music") return;
-    try {
-      const raw = sessionStorage.getItem("adfrio_seen_song_ids");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as string[];
-      seenSongIdsRef.current = new Set(parsed.slice(-800));
-    } catch {
-      seenSongIdsRef.current = new Set();
-    }
-  }, [mode]);
+    const safeVideos = filterSafeVideos(merged);
+    const unseenVideos = safeVideos.filter((item) => !excludedVideoIdsRef.current.has(item.id));
+    if (unseenVideos.length >= 10) return unseenVideos;
+    const seenVideoFallback = safeVideos.filter((item) => excludedVideoIdsRef.current.has(item.id));
+    return dedupeMediaItems([...unseenVideos, ...seenVideoFallback]);
+  }, [homeFeed.data?.pages, mode, refreshSeed]);
 
   useEffect(() => {
     if (homeFeed.isLoading) return;
@@ -114,15 +180,51 @@ export const HomePage = () => {
     void fetchNextPage();
   }, [feedItems.length, fetchNextPage, hasNextPage, homeFeed.isLoading, isFetchingNextPage]);
 
-  const visibleItems = feedItems;
+  useEffect(() => {
+    if (feedItems.length === 0 || typeof window === "undefined") return;
+    const compact = dedupeMediaItems(feedItems).slice(0, 36);
+    sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), items: compact }));
+    setCachedFeedItems(compact);
+  }, [cacheKey, feedItems]);
+
+  const visibleItems = feedItems.length > 0 ? feedItems : cachedFeedItems;
+
+  const onRefreshHome = useCallback(() => {
+    const currentIds = visibleItems.map((item) => item.id);
+    setRefreshExcludeIds(currentIds);
+    setCachedFeedItems([]);
+    setRefreshSeed(Math.floor(Date.now() + Math.random() * 100000));
+  }, [visibleItems]);
 
   useEffect(() => {
-    if (mode !== "music" || visibleItems.length === 0) return;
-    const next = new Set(seenSongIdsRef.current);
-    visibleItems.forEach((item) => next.add(item.id));
-    const trimmed = Array.from(next).slice(-800);
-    seenSongIdsRef.current = new Set(trimmed);
-    sessionStorage.setItem("adfrio_seen_song_ids", JSON.stringify(trimmed));
+    if (visibleItems.length === 0) return;
+
+    if (mode === "music") {
+      const next = new Set(historicalSeenSongIdsRef.current);
+      let changed = false;
+      visibleItems.forEach((item) => {
+        if (next.has(item.id)) return;
+        next.add(item.id);
+        changed = true;
+      });
+      if (!changed) return;
+      const trimmed = Array.from(next).slice(-1200);
+      historicalSeenSongIdsRef.current = new Set(trimmed);
+      sessionStorage.setItem("adfrio_seen_song_ids", JSON.stringify(trimmed));
+      return;
+    }
+
+    const next = new Set(historicalSeenVideoIdsRef.current);
+    let changed = false;
+    visibleItems.forEach((item) => {
+      if (next.has(item.id)) return;
+      next.add(item.id);
+      changed = true;
+    });
+    if (!changed) return;
+    const trimmed = Array.from(next).slice(-1200);
+    historicalSeenVideoIdsRef.current = new Set(trimmed);
+    sessionStorage.setItem("adfrio_seen_video_ids", JSON.stringify(trimmed));
   }, [mode, visibleItems]);
 
   useEffect(() => {
@@ -136,6 +238,25 @@ export const HomePage = () => {
     }
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
   const loaderRef = useInfiniteTrigger(triggerLoadMore);
+
+  useEffect(() => {
+    const maybeLoadMore = () => {
+      if (!hasNextPage || isFetchingNextPage || homeFeed.isLoading) return;
+      const viewportBottom = window.scrollY + window.innerHeight;
+      const pageBottom = document.documentElement.scrollHeight;
+      if (pageBottom - viewportBottom <= 900) {
+        void fetchNextPage();
+      }
+    };
+
+    maybeLoadMore();
+    window.addEventListener("scroll", maybeLoadMore, { passive: true });
+    window.addEventListener("resize", maybeLoadMore);
+    return () => {
+      window.removeEventListener("scroll", maybeLoadMore);
+      window.removeEventListener("resize", maybeLoadMore);
+    };
+  }, [fetchNextPage, hasNextPage, homeFeed.isLoading, isFetchingNextPage, visibleItems.length]);
 
   const ensureFavoritesPlaylist = useCallback(async () => {
     const playlists = await playlistApi.list();
@@ -209,23 +330,18 @@ export const HomePage = () => {
 
   return (
     <section className="space-y-6">
-      <header className="space-y-3">
+      <header className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-3xl font-bold uppercase tracking-[0.16em]">
-            {mode === "music" ? "Songs Home" : "Videos Home"}
-          </h1>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setRefreshSeed(Math.floor(Date.now() + Math.random() * 100000))}
-            aria-label="Refresh home feed"
-          >
+          <div>
+            <h1 className="text-xl font-semibold tracking-wide">
+              {mode === "music" ? "Top Songs" : "Top Videos"}
+            </h1>
+            <p className="text-xs text-white/60">Fresh picks for you</p>
+          </div>
+          <Button variant="outline" size="icon" onClick={onRefreshHome} aria-label="Refresh home feed">
             <RefreshCw className={`h-4 w-4 ${homeFeed.isFetching ? "animate-spin" : ""}`} />
           </Button>
         </div>
-        <p className="text-sm text-white/60">
-          {mode === "music" ? `Fresh ${language} songs only` : `Fresh ${language} trending videos`}
-        </p>
         {realtimeProgressText ? <p className="text-xs text-cyan-200/90">{realtimeProgressText}</p> : null}
       </header>
 
@@ -242,19 +358,6 @@ export const HomePage = () => {
       ) : null}
 
       <section className="space-y-4">
-        {mode === "video" ? (
-          <div className="space-y-2">
-            <h2 className="text-lg font-semibold uppercase tracking-[0.12em] text-white/80">Trending Videos</h2>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-white/85">
-                Entertainment
-              </span>
-              <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-white/85">
-                Important
-              </span>
-            </div>
-          </div>
-        ) : null}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {visibleItems.map((item) => (
             <MediaCard
@@ -274,7 +377,7 @@ export const HomePage = () => {
         <div ref={loaderRef} className="h-3" />
       </section>
 
-      {(homeFeed.isLoading || homeFeed.isFetchingNextPage) && (
+      {(homeFeed.isLoading || homeFeed.isFetchingNextPage) && visibleItems.length === 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, index) => (
             <div key={index} className="h-28 animate-pulse rounded-xl bg-white/5" />

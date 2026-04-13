@@ -27,6 +27,27 @@ const BLOCKED_SONG_KEYWORDS = [
   "shorts"
 ];
 
+const BLOCKED_VIDEO_PATTERNS: RegExp[] = [
+  /\bsex\b/i,
+  /sexy/i,
+  /sexual/i,
+  /\bxxx\b/i,
+  /\bporn\b/i,
+  /\bnude\b/i,
+  /\bnsfw\b/i,
+  /\badult\b/i,
+  /\b18\+\b/i,
+  /\b21\+\b/i,
+  /\bbikini\b/i,
+  /\bcleavage\b/i,
+  /\bboob(s)?\b/i,
+  /\bnipple(s)?\b/i,
+  /\bbed\s+scene\b/i,
+  /\bhot\s+(scene|video|clip|clips|actress|model)\b/i,
+  /\bkiss\s+scene\b/i,
+  /\bromance\s+scene\b/i,
+];
+
 export const dedupeMediaItems = (items: MediaItem[]): MediaItem[] => {
   const seen = new Set<string>();
   return items.filter((item) => {
@@ -51,3 +72,15 @@ export const isLikelySong = (item: MediaItem): boolean => {
 
 export const filterStrictSongs = (items: MediaItem[]): MediaItem[] =>
   items.filter(isLikelySong);
+
+export const isSafeVideo = (item: MediaItem): boolean => {
+  if (item.type !== "video") return false;
+  if (typeof item.duration === "number" && item.duration > 0 && item.duration < 45) return false;
+
+  const text = `${item.title} ${item.creator}`.toLowerCase();
+  if (text.includes("shorts")) return false;
+  return !BLOCKED_VIDEO_PATTERNS.some((pattern) => pattern.test(text));
+};
+
+export const filterSafeVideos = (items: MediaItem[]): MediaItem[] =>
+  items.filter(isSafeVideo);

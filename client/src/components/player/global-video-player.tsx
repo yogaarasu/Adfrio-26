@@ -173,6 +173,19 @@ export const GlobalVideoPlayer = () => {
     [loadingRelatedId, playVideo, updateVideoSession, video.related]
   );
 
+  const onVideoEnded = useCallback(() => {
+    if (loadingRelatedId) {
+      setPlaying(false);
+      return;
+    }
+    const next = video.related.find((item) => item.id && item.id !== current?.id);
+    if (!next) {
+      setPlaying(false);
+      return;
+    }
+    void playRelated(next);
+  }, [current?.id, loadingRelatedId, playRelated, setPlaying, video.related]);
+
   if (!isMounted || !current || current.type !== "video") return null;
 
   const ytUrl = `https://www.youtube.com/watch?v=${current.id}`;
@@ -275,7 +288,7 @@ export const GlobalVideoPlayer = () => {
                   setPlaying(true);
                 }}
                 onPause={() => setPlaying(false)}
-                onEnded={() => setPlaying(false)}
+                onEnded={onVideoEnded}
                 onError={(e: any, data?: any) => {
                   const code = typeof e === "number" ? e : data?.code;
                   const fallbackMessage =
