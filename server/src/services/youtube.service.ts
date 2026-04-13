@@ -29,6 +29,57 @@ export interface MediaItem {
   youtubeUrl: string;
 }
 
+const UNKNOWN_TEXT_PATTERN =
+  /^(unknown(\s+(title|creator|artist|channel|video))?|untitled|n\/a|none|null|youtube)$/i;
+
+const STOPWORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "this",
+  "that",
+  "your",
+  "official",
+  "video",
+  "music",
+  "song",
+  "songs",
+  "feat",
+  "ft",
+  "by",
+]);
+
+const normalizeText = (value: string | null | undefined): string =>
+  (value ?? "").trim().replace(/\s+/g, " ");
+
+const hasMeaningfulText = (value: string | null | undefined): boolean => {
+  const clean = normalizeText(value);
+  return clean.length > 0 && !UNKNOWN_TEXT_PATTERN.test(clean);
+};
+
+const toKeywordTokens = (value: string): string[] =>
+  normalizeText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !STOPWORDS.has(token));
+
+const buildRelatedSeed = (...parts: Array<string | null | undefined>): string => {
+  const meaningful = parts
+    .map((part) => normalizeText(part))
+    .filter((part) => hasMeaningfulText(part));
+  return meaningful.join(" ").trim();
+};
+
+const isValidMediaItem = (item: MediaItem, excludeId?: string): boolean => {
+  if (!item.id) return false;
+  if (excludeId && item.id === excludeId) return false;
+  return hasMeaningfulText(item.title) && hasMeaningfulText(item.creator);
+};
+
 const DISCOVERY_KEYWORDS = [
   "Lo-fi beats for relaxing", "Chillhop 2024", "Deep House Mix", "Synthwave 80s",
   "Acoustic covers of popular songs", "Jazz for study", "Classical masterpieces",
@@ -159,8 +210,13 @@ export const searchYoutube = async (
 
   // De-duplicate while preserving source order (no random shuffling).
   const unique = Array.from(new Map(results.map((item) => [item.id, item])).values());
-
-  return { items: unique, nextPageToken };
+  const cleaned = unique.filter((item) =>
+    type === "video" ? isValidMediaItem(item) : Boolean(item.id)
+  );
+  const items = type === "video"
+    ? (cleaned.length > 0 ? cleaned : unique.filter((item) => Boolean(item.id)))
+    : cleaned;
+  return { items, nextPageToken };
 };
 
 // ─── Stream Source Resolution ─────────────────────────────────────────────────────
@@ -300,8 +356,7 @@ const dedupeRelatedVideos = (items: MediaItem[], excludeId: string): MediaItem[]
   const seen = new Set<string>();
   const unique: MediaItem[] = [];
   for (const item of items) {
-    if (!item.id) continue;
-    if (item.id === excludeId) continue;
+    if (!isValidMediaItem(item, excludeId)) continue;
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     unique.push(item);
@@ -321,11 +376,32 @@ const fetchFallbackRelatedVideos = async (
 
   try {
     const candidates = await innertubeSearch(trimmedQuery, Math.max(neededCount * 3, 36));
+    const queryTokens = new Set(toKeywordTokens(trimmedQuery));
     const fallback: MediaItem[] = [];
+    const scored = candidates
+      .filter((item) => isValidMediaItem({
+        id: item.id,
+        title: item.title,
+        creator: item.creator,
+        creatorAvatarUrl: item.creatorAvatarUrl ?? null,
+        thumbnail: item.thumbnail,
+        duration: item.duration,
+        type: "video",
+        youtubeUrl: `https://www.youtube.com/watch?v=${item.id}`,
+      }, excludeId))
+      .map((item) => {
+        const titleTokens = toKeywordTokens(item.title);
+        const creatorTokens = toKeywordTokens(item.creator);
+        let overlap = 0;
+        for (const token of [...titleTokens, ...creatorTokens]) {
+          if (queryTokens.has(token)) overlap += 1;
+        }
+        return { item, score: overlap };
+      })
+      .sort((a, b) => b.score - a.score);
 
-    for (const item of candidates) {
+    for (const { item } of scored) {
       if (!item.id) continue;
-      if (item.id === excludeId) continue;
       if (existingIds.has(item.id)) continue;
       existingIds.add(item.id);
       fallback.push({
@@ -372,7 +448,7 @@ export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
     if (related.length < MIN_RELATED_VIDEOS) {
       const knownIds = new Set(related.map((item) => item.id));
       const fallbackRelated = await fetchFallbackRelatedVideos(
-        `${data.title} ${data.uploader}`,
+        buildRelatedSeed(data.title, data.uploader, data.description?.slice(0, 140)),
         cleanId,
         knownIds,
         MIN_RELATED_VIDEOS - related.length
@@ -401,10 +477,12 @@ export const getVideoInfo = async (videoId: string): Promise<VideoInfo> => {
   await initPlayDl();
   try {
     const info = await play.video_info(`https://www.youtube.com/watch?v=${cleanId}`);
-    const title = info.video_details.title ?? "Unknown Title";
-    const uploader = info.video_details.channel?.name ?? "Unknown Creator";
+    const rawTitle = normalizeText(info.video_details.title ?? "");
+    const rawUploader = normalizeText(info.video_details.channel?.name ?? "");
+    const title = hasMeaningfulText(rawTitle) ? rawTitle : "Media Item";
+    const uploader = hasMeaningfulText(rawUploader) ? rawUploader : "YouTube";
     const related = await fetchFallbackRelatedVideos(
-      `${title} ${uploader}`,
+      buildRelatedSeed(rawTitle, rawUploader, (info.video_details.description ?? "").slice(0, 140)),
       cleanId,
       new Set<string>(),
       MIN_RELATED_VIDEOS

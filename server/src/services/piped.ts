@@ -78,6 +78,17 @@ const isMuxedMimeType = (mimeType?: string): boolean => {
   return /codecs="[^"]+,[^"]+"/i.test(mimeType);
 };
 
+const UNKNOWN_TEXT_PATTERN =
+  /^(unknown(\s+(title|creator|artist|channel|video))?|untitled|n\/a|none|null)$/i;
+
+const normalizeText = (value: string | null | undefined): string =>
+  (value ?? "").trim().replace(/\s+/g, " ");
+
+const hasMeaningfulText = (value: string | null | undefined): boolean => {
+  const clean = normalizeText(value);
+  return clean.length > 0 && !UNKNOWN_TEXT_PATTERN.test(clean);
+};
+
 const durationTextToSeconds = (raw?: string): number | null => {
   if (!raw) return null;
   const parts = raw.split(":").map((part) => Number(part));
@@ -590,11 +601,14 @@ export const normalizeStreams = (raw: StreamInfo) => {
     .map((entry) => {
       const id = entry.url ? extractMediaId(entry.url) : "";
       if (!id) return null;
+      const title = normalizeText(entry.title ?? "");
+      const creator = normalizeText(entry.uploaderName ?? "");
+      if (!hasMeaningfulText(title) || !hasMeaningfulText(creator)) return null;
 
       return {
         id,
-        title: entry.title ?? "Untitled",
-        creator: entry.uploaderName ?? "Unknown creator",
+        title,
+        creator,
         thumbnail: entry.thumbnail ?? "",
         duration: entry.duration ?? null,
         type: "video" as const,

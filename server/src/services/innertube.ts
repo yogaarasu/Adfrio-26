@@ -11,6 +11,17 @@ import { Innertube, UniversalCache } from "youtubei.js";
 let _client: Innertube | null = null;
 let _initPromise: Promise<Innertube> | null = null;
 
+const UNKNOWN_TEXT_PATTERN =
+  /^(unknown(\s+(title|creator|artist|channel|video))?|untitled|related video|youtube)$/i;
+
+const normalizeText = (value: string | null | undefined): string =>
+  (value ?? "").trim().replace(/\s+/g, " ");
+
+const hasMeaningfulText = (value: string | null | undefined): boolean => {
+  const clean = normalizeText(value);
+  return clean.length > 0 && !UNKNOWN_TEXT_PATTERN.test(clean);
+};
+
 export const getInnertube = async (): Promise<Innertube> => {
   if (_client) return _client;
   if (_initPromise) return _initPromise;
@@ -61,16 +72,19 @@ export const innertubeSearch = async (
     if (!id) continue;
 
     const titleObj: any = item?.title;
-    const title: string =
+    const titleRaw: string =
       typeof titleObj === "string"
         ? titleObj
         : (titleObj?.text ?? titleObj?.runs?.[0]?.text ?? "Unknown Title");
+    const title = normalizeText(titleRaw);
 
     const authorObj: any = item?.short_byline_text ?? item?.author;
-    const creator: string =
+    const creatorRaw: string =
       typeof authorObj === "string"
         ? authorObj
         : (authorObj?.text ?? authorObj?.runs?.[0]?.text ?? authorObj?.name ?? "Unknown Creator");
+    const creator = normalizeText(creatorRaw);
+    if (!hasMeaningfulText(title) || !hasMeaningfulText(creator)) continue;
     const creatorAvatarUrl: string | null =
       authorObj?.thumbnails?.[0]?.url ??
       item?.author?.thumbnails?.[0]?.url ??
@@ -248,16 +262,19 @@ export const innertubeGetStreams = async (
     relatedIdsSeen.add(id);
 
     const titleObj: any = item?.title;
-    const title: string =
+    const titleRaw: string =
       typeof titleObj === "string"
         ? titleObj
         : (titleObj?.text ?? titleObj?.runs?.[0]?.text ?? "Related Video");
+    const title = normalizeText(titleRaw);
 
     const authorObj: any = item?.short_byline_text ?? item?.author ?? item?.channel;
-    const creator: string =
+    const creatorRaw: string =
       typeof authorObj === "string"
         ? authorObj
         : (authorObj?.text ?? authorObj?.runs?.[0]?.text ?? authorObj?.name ?? "YouTube");
+    const creator = normalizeText(creatorRaw);
+    if (!hasMeaningfulText(title) || !hasMeaningfulText(creator)) continue;
     const creatorAvatarUrl: string | null =
       authorObj?.thumbnails?.[0]?.url ??
       item?.author?.thumbnails?.[0]?.url ??
