@@ -66,7 +66,8 @@ export const MediaPage = ({ type }: Props) => {
           items
         );
       } else {
-        playVideo(item, [], []);
+        const started = playVideo(item, [], []);
+        if (!started) return;
         mediaApi.streams(item.id).then((stream) => {
           updateVideoSession(item.id, {
             related: stream.related ?? [],

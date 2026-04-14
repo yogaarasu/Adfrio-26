@@ -34,3 +34,10 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+export const hasAuthSession = (): boolean => {
+  const state = useAuthStore.getState();
+  if (state.token && state.user) return true;
+  if (typeof window === "undefined") return Boolean(state.token);
+  return Boolean(state.token ?? localStorage.getItem("adfrio_token"));
+};

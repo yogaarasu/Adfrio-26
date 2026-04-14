@@ -5,8 +5,10 @@ const userSchema = new Schema(
     email: { type: String, required: true, unique: true, lowercase: true, index: true },
     name: { type: String, required: true, trim: true },
     avatar: { type: String, default: null },
-    authProvider: { type: String, enum: ["google", "otp"], required: true },
+    authProvider: { type: String, enum: ["google", "otp", "local"], required: true },
     googleSub: { type: String, default: null },
+    passwordHash: { type: String, default: null },
+    emailVerified: { type: Boolean, default: true },
     lastLoginAt: { type: Date, default: null }
   },
   { timestamps: true }

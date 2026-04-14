@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { MediaItem } from "@/types/media";
+import { hasAuthSession } from "@/store/auth-store";
+import { useAuthGateStore } from "@/store/auth-gate-store";
 
 type AudioSource = {
   url: string;
@@ -47,10 +49,10 @@ type PlayerState = {
   audioError: string | null;
   seekRequestTime: number | null;
   setQueue: (queue: MediaItem[]) => void;
-  playAudio: (media: MediaItem, source: AudioSource, queue?: MediaItem[]) => void;
-  playVideo: (media: MediaItem, sources: VideoSource[], extras?: MediaItem[] | VideoExtras) => void;
+  playAudio: (media: MediaItem, source: AudioSource, queue?: MediaItem[]) => boolean;
+  playVideo: (media: MediaItem, sources: VideoSource[], extras?: MediaItem[] | VideoExtras) => boolean;
   updateVideoSession: (mediaId: string, updates: VideoExtras) => void;
-  openVideoOverlay: () => void;
+  openVideoOverlay: () => boolean;
   pauseAll: () => void;
   resumeAudio: () => void;
   setPlaying: (playing: boolean) => void;
@@ -78,6 +80,14 @@ const emptyVideoSession: VideoSession = {
   related: [],
 };
 
+const ensurePlaybackAccess = (): boolean => {
+  if (hasAuthSession()) return true;
+  useAuthGateStore
+    .getState()
+    .show("Sign In To Play", "Sign up or sign in to play media and unlock full access.");
+  return false;
+};
+
 export const usePlayerStore = create<PlayerState>()(
   persist(
     (set, get) => ({
@@ -96,6 +106,7 @@ export const usePlayerStore = create<PlayerState>()(
       setQueue: (queue) => set({ queue }),
 
       playAudio: (media, source, queue) => {
+        if (!ensurePlaybackAccess()) return false;
         set({
           current: media,
           audio: source,
@@ -107,9 +118,11 @@ export const usePlayerStore = create<PlayerState>()(
           audioError: null,
           seekRequestTime: null,
         });
+        return true;
       },
 
       playVideo: (media, sources, extras = []) => {
+        if (!ensurePlaybackAccess()) return false;
         const normalized: VideoExtras = Array.isArray(extras) ? { related: extras } : extras;
         const resolvedSources = normalized.sources ?? sources;
         set({
@@ -131,6 +144,7 @@ export const usePlayerStore = create<PlayerState>()(
             related: normalized.related ?? [],
           },
         });
+        return true;
       },
 
       updateVideoSession: (mediaId, updates) => {
@@ -155,8 +169,9 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       openVideoOverlay: () => {
+        if (!ensurePlaybackAccess()) return false;
         const current = get().current;
-        if (!current || current.type !== "video") return;
+        if (!current || current.type !== "video") return false;
         const previous = get().video;
         set({
           video: {
@@ -164,17 +179,22 @@ export const usePlayerStore = create<PlayerState>()(
             active: true,
           }
         });
+        return true;
       },
 
       pauseAll: () => set({ playing: false }),
 
       resumeAudio: () => {
+        if (!ensurePlaybackAccess()) return;
         if (get().audio) {
           set({ playing: true, video: emptyVideoSession });
         }
       },
 
-      setPlaying: (playing) => set({ playing }),
+      setPlaying: (playing) => {
+        if (playing && !ensurePlaybackAccess()) return;
+        set({ playing });
+      },
       setProgress: (nextTime, nextDuration) =>
         set((state) => {
           const fallbackDuration = Number(state.current?.duration ?? 0);

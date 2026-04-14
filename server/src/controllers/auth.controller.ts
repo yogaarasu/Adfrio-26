@@ -1,12 +1,21 @@
 ﻿import axios from "axios";
 import bcrypt from "bcryptjs";
+import { timingSafeEqual } from "node:crypto";
 import { OAuth2Client } from "google-auth-library";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../config/env.js";
-import { OtpCodeModel } from "../models/OtpCode.js";
 import { UserModel } from "../models/User.js";
 import { sendOtpEmail } from "../services/mailer.js";
+import {
+  OTP_MAX_ATTEMPTS,
+  checkOtpRequestPolicy,
+  deleteOtpSession,
+  getOtpSession,
+  incrementOtpAttempts,
+  markOtpDispatch,
+  storeOtpSession,
+} from "../services/otp-store.js";
 import { sendError } from "../utils/http.js";
 import { signJwt } from "../utils/jwt.js";
 
@@ -19,7 +28,7 @@ const otpRequestSchema = z.object({
 
 const otpVerifySchema = z.object({
   email: z.string().email(),
-  otp: z.string().length(6)
+  otp: z.string().trim().regex(/^\d{6}$/)
 });
 
 const googleCredentialSchema = z.object({
@@ -28,6 +37,44 @@ const googleCredentialSchema = z.object({
 
 const googleCodeSchema = z.object({
   code: z.string().min(1)
+});
+
+const NAME_REGEX = /^[A-Za-z]+(?:[ '-][A-Za-z]+)*$/;
+const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,64}$/;
+
+const signupRequestSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2)
+    .max(50)
+    .refine((value) => NAME_REGEX.test(value), "Name must contain letters only"),
+  email: z.string().email(),
+  password: z
+    .string()
+    .min(8)
+    .max(64)
+    .refine(
+      (value) => STRONG_PASSWORD_REGEX.test(value),
+      "Password must include upper, lower, number and special character"
+    ),
+});
+
+const signupVerifySchema = z.object({
+  email: z.string().email(),
+  otp: z.string().trim().regex(/^\d{6}$/),
+});
+
+const signinSchema = z.object({
+  email: z.string().email(),
+  password: z
+    .string()
+    .min(8)
+    .max(64)
+    .refine(
+      (value) => STRONG_PASSWORD_REGEX.test(value),
+      "Password must include upper, lower, number and special character"
+    ),
 });
 
 type GoogleIdentity = {
@@ -43,6 +90,32 @@ const sanitizeUser = (user: { _id: unknown; email: string; name: string; avatar?
   name: user.name,
   avatar: user.avatar ?? null
 });
+
+const normalizeName = (value: string): string =>
+  value
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1).toLowerCase())
+    .join(" ");
+
+const isOtpMatch = (stored: string, entered: string): boolean => {
+  const storedBuffer = Buffer.from(stored, "utf-8");
+  const enteredBuffer = Buffer.from(entered, "utf-8");
+  if (storedBuffer.length !== enteredBuffer.length) return false;
+  return timingSafeEqual(storedBuffer, enteredBuffer);
+};
+
+const resolveSmtpErrorMessage = (error: unknown): string => {
+  const code = (error as { code?: string })?.code;
+  if (code === "EAUTH") {
+    return "SMTP authentication failed. Check SMTP_USER and SMTP_PASS.";
+  }
+  if (code === "ETIMEDOUT" || code === "ESOCKET" || code === "EDNS") {
+    return "Unable to reach SMTP server. Check SMTP_HOST, SMTP_PORT, and network access.";
+  }
+  return "Unable to send OTP email. Please try again.";
+};
 
 const buildApiBaseUrl = (req: Request): string => {
   const proto =
@@ -81,6 +154,7 @@ const upsertGoogleUser = async (identity: GoogleIdentity) => {
       avatar: identity.picture ?? null,
       authProvider: "google",
       googleSub: identity.sub ?? null,
+      emailVerified: true,
       lastLoginAt: new Date()
     });
     return user;
@@ -89,6 +163,7 @@ const upsertGoogleUser = async (identity: GoogleIdentity) => {
   user.avatar = identity.picture ?? user.avatar;
   user.name = identity.name ?? user.name;
   user.googleSub = identity.sub ?? user.googleSub;
+  user.emailVerified = true;
   user.lastLoginAt = new Date();
   await user.save();
   return user;
@@ -101,19 +176,37 @@ export const requestOtp = async (req: Request, res: Response): Promise<Response>
   }
 
   const email = parsed.data.email.toLowerCase();
+  const policy = await checkOtpRequestPolicy("login", email);
+  if (!policy.allowed) {
+    return sendError(res, 429, policy.message);
+  }
+
   const otp = `${Math.floor(100000 + Math.random() * 900000)}`;
-  const codeHash = await bcrypt.hash(otp, 10);
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  let mailDeliveryFailed = false;
+  await storeOtpSession("login", email, otp);
 
-  await OtpCodeModel.findOneAndUpdate(
-    { email },
-    { codeHash, expiresAt, attempts: 0 },
-    { upsert: true, new: true }
+  try {
+    await sendOtpEmail(email, otp, {
+      title: "Your Sign-In Verification Code",
+      subtitle: "Use this one-time code to sign in to Adfrio.",
+    });
+  } catch (error) {
+    console.error("[SIGNIN OTP EMAIL ERROR]", error);
+    if (env.NODE_ENV === "production") {
+      await deleteOtpSession("login", email);
+      return sendError(res, 502, resolveSmtpErrorMessage(error));
+    }
+    mailDeliveryFailed = true;
+    console.log(`[DEV OTP][LOGIN] ${email}: ${otp}`);
+  }
+
+  await markOtpDispatch("login", email);
+
+  return res.json(
+    mailDeliveryFailed
+      ? { message: "OTP generated for local development.", devOtp: otp }
+      : { message: "OTP sent" }
   );
-
-  await sendOtpEmail(email, otp);
-
-  return res.json({ message: "OTP sent" });
 };
 
 export const verifyOtp = async (req: Request, res: Response): Promise<Response> => {
@@ -123,39 +216,197 @@ export const verifyOtp = async (req: Request, res: Response): Promise<Response> 
   }
 
   const email = parsed.data.email.toLowerCase();
-  const otpDoc = await OtpCodeModel.findOne({ email });
+  const otpSession = await getOtpSession("login", email);
 
-  if (!otpDoc || otpDoc.expiresAt.getTime() < Date.now()) {
+  if (!otpSession) {
     return sendError(res, 400, "OTP expired or not found");
   }
 
-  if (otpDoc.attempts >= 5) {
+  if (otpSession.attempts >= OTP_MAX_ATTEMPTS) {
+    await deleteOtpSession("login", email);
     return sendError(res, 429, "Too many attempts, request a new OTP");
   }
 
-  const isValid = await bcrypt.compare(parsed.data.otp, otpDoc.codeHash);
+  const isValid = isOtpMatch(otpSession.code, parsed.data.otp);
   if (!isValid) {
-    otpDoc.attempts += 1;
-    await otpDoc.save();
+    const attempts = await incrementOtpAttempts("login", email);
+    if (attempts >= OTP_MAX_ATTEMPTS) {
+      await deleteOtpSession("login", email);
+      return sendError(res, 429, "Too many attempts, request a new OTP");
+    }
     return sendError(res, 400, "Incorrect OTP");
   }
 
-  await OtpCodeModel.deleteOne({ email });
+  await deleteOtpSession("login", email);
 
   let user = await UserModel.findOne({ email });
+  if (user?.passwordHash) {
+    return sendError(res, 400, "This account uses password sign-in");
+  }
+
   if (!user) {
     user = await UserModel.create({
       email,
-      name: email.split("@")[0],
-      authProvider: "otp"
+      name: normalizeName(email.split("@")[0] ?? "User"),
+      authProvider: "otp",
+      passwordHash: null,
+      emailVerified: true,
     });
+  }
+
+  user.emailVerified = true;
+  user.lastLoginAt = new Date();
+  await user.save();
+
+  const token = signJwt({ userId: String(user._id), email: user.email, name: user.name });
+
+  return res.json({ token, user: sanitizeUser(user) });
+};
+
+export const signupRequestOtp = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = signupRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, parsed.error.issues[0]?.message ?? "Invalid request payload");
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const name = normalizeName(parsed.data.name);
+  const policy = await checkOtpRequestPolicy("signup", email);
+  if (!policy.allowed) {
+    return sendError(res, 429, policy.message);
+  }
+
+  const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+
+  const existing = await UserModel.findOne({ email }).lean();
+  if (existing?.passwordHash && existing.emailVerified !== false) {
+    return sendError(res, 409, "Account already exists. Please sign in.");
+  }
+  if (existing?.authProvider === "google" && !existing.passwordHash) {
+    return sendError(res, 409, "Account already exists with Google sign-in.");
+  }
+
+  await UserModel.findOneAndUpdate(
+    { email },
+    {
+      email,
+      name,
+      passwordHash,
+      authProvider: "local",
+      avatar: existing?.avatar ?? null,
+      googleSub: existing?.googleSub ?? null,
+      emailVerified: false,
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  const otp = `${Math.floor(100000 + Math.random() * 900000)}`;
+  let mailDeliveryFailed = false;
+  await storeOtpSession("signup", email, otp);
+
+  try {
+    await sendOtpEmail(email, otp, {
+      title: "Verify Your Sign-Up",
+      subtitle: "Confirm your Adfrio account with this one-time verification code.",
+    });
+  } catch (error) {
+    console.error("[SIGNUP OTP EMAIL ERROR]", error);
+    if (env.NODE_ENV === "production") {
+      await deleteOtpSession("signup", email);
+      await UserModel.deleteOne({ email, emailVerified: false });
+      return sendError(res, 502, resolveSmtpErrorMessage(error));
+    }
+    mailDeliveryFailed = true;
+    console.log(`[DEV OTP][SIGNUP] ${email}: ${otp}`);
+  }
+
+  await markOtpDispatch("signup", email);
+
+  return res.json(
+    mailDeliveryFailed
+      ? { message: "Verification OTP generated for local development.", devOtp: otp }
+      : { message: "Verification OTP sent" }
+  );
+};
+
+export const signupVerifyOtp = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = signupVerifySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, "Invalid request payload");
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const otpSession = await getOtpSession("signup", email);
+
+  if (!otpSession) {
+    return sendError(res, 400, "OTP expired or not found");
+  }
+
+  if (otpSession.attempts >= OTP_MAX_ATTEMPTS) {
+    await deleteOtpSession("signup", email);
+    return sendError(res, 429, "Too many attempts, request a new OTP");
+  }
+
+  const isValid = isOtpMatch(otpSession.code, parsed.data.otp);
+  if (!isValid) {
+    const attempts = await incrementOtpAttempts("signup", email);
+    if (attempts >= OTP_MAX_ATTEMPTS) {
+      await deleteOtpSession("signup", email);
+      return sendError(res, 429, "Too many attempts, request a new OTP");
+    }
+    return sendError(res, 400, "Incorrect OTP");
+  }
+
+  let user = await UserModel.findOne({ email });
+  if (!user) {
+    await deleteOtpSession("signup", email);
+    return sendError(res, 400, "Sign-up session expired. Please request a new code.");
+  }
+  if (!user.passwordHash) {
+    await deleteOtpSession("signup", email);
+    return sendError(res, 400, "Password setup missing. Please sign up again.");
+  }
+  if (user.emailVerified === true) {
+    await deleteOtpSession("signup", email);
+    return sendError(res, 409, "Account already exists. Please sign in.");
+  }
+
+  user.authProvider = "local";
+  user.emailVerified = true;
+  user.lastLoginAt = new Date();
+  await user.save();
+
+  await deleteOtpSession("signup", email);
+
+  const token = signJwt({ userId: String(user._id), email: user.email, name: user.name });
+  return res.json({ token, user: sanitizeUser(user) });
+};
+
+export const signInWithPassword = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = signinSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, "Invalid request payload");
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const user = await UserModel.findOne({ email });
+  const passwordHash = user?.passwordHash ?? null;
+  if (!user || !passwordHash) {
+    return sendError(res, 401, "Invalid email or password");
+  }
+  if (!user.emailVerified) {
+    return sendError(res, 403, "Please verify your email OTP before signing in.");
+  }
+
+  const isValid = await bcrypt.compare(parsed.data.password, passwordHash);
+  if (!isValid) {
+    return sendError(res, 401, "Invalid email or password");
   }
 
   user.lastLoginAt = new Date();
   await user.save();
 
   const token = signJwt({ userId: String(user._id), email: user.email, name: user.name });
-
   return res.json({ token, user: sanitizeUser(user) });
 };
 

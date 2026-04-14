@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@upstash/redis": "^1.35.6",
     "@distube/ytdl-core": "^4.16.12",
     "axios": "^1.8.2",
     "bcryptjs": "^2.4.3",

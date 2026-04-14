@@ -93,6 +93,10 @@ export type SearchApiResponse = {
 export const authApi = {
   requestOtp: (email: string, name: string) => api.post("/auth/otp/request", { email, name }),
   verifyOtp: (email: string, otp: string) => api.post("/auth/otp/verify", { email, otp }),
+  signupRequest: (name: string, email: string, password: string) =>
+    api.post("/auth/signup/request", { name, email, password }),
+  signupVerify: (email: string, otp: string) => api.post("/auth/signup/verify", { email, otp }),
+  signIn: (email: string, password: string) => api.post("/auth/signin", { email, password }),
   googleAuth: (credential: string) => api.post("/auth/google", { credential }),
   googleAuthCode: (code: string) => api.post("/auth/google/code", { code }),
   me: () => api.get<MeResponse>("/auth/me")

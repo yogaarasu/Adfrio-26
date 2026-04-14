@@ -159,7 +159,8 @@ export const SearchPage = () => {
           return;
         }
 
-        playVideo(item, [], []);
+        const started = playVideo(item, [], []);
+        if (!started) return;
         mediaApi
           .streams(item.id)
           .then((stream) => {

@@ -253,11 +253,12 @@ export const GlobalVideoPlayer = () => {
       setLoadingRelatedId(item.id);
       setSaveMessage(null);
       try {
-        playVideo({ ...item, type: "video" }, [], {
+        const started = playVideo({ ...item, type: "video" }, [], {
           related: video.related,
           uploader: item.creator,
           uploaderAvatarUrl: item.creatorAvatarUrl ?? null,
         });
+        if (!started) return;
         relatedHydrationAttemptsRef.current.set(item.id, 0);
         await hydrateVideoSession({ ...item, type: "video" });
       } catch {
