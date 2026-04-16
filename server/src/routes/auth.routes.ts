@@ -1,5 +1,7 @@
 ﻿import { Router } from "express";
 import {
+  changePassword,
+  deleteAccount,
   googleAuth,
   googleAuthCallback,
   googleAuthCode,
@@ -26,3 +28,5 @@ authRouter.post("/signin", asyncHandler(signInWithPassword));
 authRouter.post("/otp/request", asyncHandler(requestOtp));
 authRouter.post("/otp/verify", asyncHandler(verifyOtp));
 authRouter.get("/me", requireAuth, asyncHandler(me));
+authRouter.patch("/password", requireAuth, asyncHandler(changePassword));
+authRouter.delete("/me", requireAuth, asyncHandler(deleteAccount));

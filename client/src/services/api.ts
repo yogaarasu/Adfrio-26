@@ -97,9 +97,12 @@ export const authApi = {
     api.post("/auth/signup/request", { name, email, password }),
   signupVerify: (email: string, otp: string) => api.post("/auth/signup/verify", { email, otp }),
   signIn: (email: string, password: string) => api.post("/auth/signin", { email, password }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.patch("/auth/password", { currentPassword, newPassword }),
   googleAuth: (credential: string) => api.post("/auth/google", { credential }),
   googleAuthCode: (code: string) => api.post("/auth/google/code", { code }),
-  me: () => api.get<MeResponse>("/auth/me")
+  me: () => api.get<MeResponse>("/auth/me"),
+  deleteAccount: () => api.delete("/auth/me")
 };
 
 type StreamOptions = {

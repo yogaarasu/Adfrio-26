@@ -164,7 +164,7 @@ export const NowPlayingPage = () => {
       <section className="mx-auto max-w-xl space-y-4">
         <h1 className="text-3xl font-bold uppercase tracking-[0.16em]">Now Playing</h1>
         <Card>
-          <p className="text-sm text-white/70">Nothing is playing yet. Start from Home or Search.</p>
+          <p className="text-sm text-muted-foreground">Nothing is playing yet. Start from Home or Search.</p>
         </Card>
       </section>
     );
@@ -175,7 +175,9 @@ export const NowPlayingPage = () => {
       <section className="mx-auto max-w-xl space-y-4">
         <h1 className="text-3xl font-bold uppercase tracking-[0.16em]">Now Playing</h1>
         <Card className="space-y-3">
-          <p className="text-sm text-white/70">A video is active. Open the full video player to continue.</p>
+          <p className="text-sm text-muted-foreground">
+            A video is active. Open the full video player to continue.
+          </p>
           <Button onClick={openVideoOverlay}>Open Video</Button>
         </Card>
       </section>
@@ -215,15 +217,15 @@ export const NowPlayingPage = () => {
         <span className="w-10" aria-hidden="true" />
       </header>
 
-      <div className="mx-auto w-full max-w-lg rounded-3xl border border-white/10 bg-gradient-to-b from-rose-900/30 via-black/30 to-black/45 p-5">
-        <div className="mx-auto aspect-square w-full max-w-[18rem] overflow-hidden rounded-2xl border border-white/15 sm:max-w-[20rem]">
+      <div className="mx-auto w-full max-w-lg rounded-3xl border border-border bg-gradient-to-b from-card via-card to-muted/60 p-5">
+        <div className="mx-auto aspect-square w-full max-w-[18rem] overflow-hidden rounded-2xl border border-border sm:max-w-[20rem]">
           <img src={current.thumbnail} alt={current.title} className="h-full w-full object-cover" />
         </div>
 
         <div className="mt-5 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="line-clamp-2 text-2xl font-semibold">{current.title}</h2>
-            <p className="line-clamp-1 text-base text-white/70">{current.creator}</p>
+            <p className="line-clamp-1 text-base text-muted-foreground">{current.creator}</p>
           </div>
           <Button
             variant="outline"
@@ -240,7 +242,7 @@ export const NowPlayingPage = () => {
         <div className="mt-5 space-y-2">
           <div
             ref={progressTrackRef}
-            className="group relative h-1 w-full cursor-pointer rounded-full bg-white/20"
+            className="group relative h-1 w-full cursor-pointer rounded-full bg-border/90"
             role="slider"
             aria-label="Seek"
             aria-valuemin={0}
@@ -286,19 +288,19 @@ export const NowPlayingPage = () => {
               className="relative h-full rounded-full"
               style={{ width: `${progress}%`, backgroundColor: accentStrong }}
             >
-              <span className="absolute right-0 top-1/2 h-2 w-2 -translate-y-1/2 translate-x-1 rounded-full bg-white opacity-0 transition-opacity group-hover:opacity-100" />
+              <span className="absolute right-0 top-1/2 h-2 w-2 -translate-y-1/2 translate-x-1 rounded-full bg-foreground opacity-0 transition-opacity group-hover:opacity-100" />
             </div>
           </div>
-          <div className="flex items-center justify-between text-xs text-white/60">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>{formatDuration(Math.floor(displayTime))}</span>
             <span>{formatDuration(Math.floor(activeDuration))}</span>
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-5 items-center text-white">
+        <div className="mt-6 grid grid-cols-5 items-center text-foreground">
           <button
             type="button"
-            className="mx-auto text-white/75 transition hover:text-white"
+            className="mx-auto text-muted-foreground transition hover:text-foreground"
             onClick={() => setStatus("Shuffle queue is not enabled yet")}
             aria-label="Shuffle"
           >
@@ -309,7 +311,7 @@ export const NowPlayingPage = () => {
           </Button>
           <Button
             size="icon"
-            className="mx-auto h-14 w-14 rounded-full bg-white text-black hover:bg-white/90"
+            className="mx-auto h-14 w-14 rounded-full bg-primary text-primary-foreground hover:opacity-90"
             onClick={() => setPlaying(!playing)}
             aria-label={playing ? "Pause song" : "Play song"}
           >
@@ -320,7 +322,7 @@ export const NowPlayingPage = () => {
           </Button>
           <button
             type="button"
-            className="mx-auto text-white/75 transition hover:text-white"
+            className="mx-auto text-muted-foreground transition hover:text-foreground"
             onClick={() => setShowTimerMenu((value) => !value)}
             aria-label="Sleep timer"
           >
@@ -328,13 +330,13 @@ export const NowPlayingPage = () => {
           </button>
         </div>
 
-        <p className="mt-3 text-center text-xs text-white/60">
+        <p className="mt-3 text-center text-xs text-muted-foreground">
           {sleepMinutesLeft !== null && sleepMinutesLeft > 0 ? `${sleepMinutesLeft} min left` : "Sleep timer off"}
         </p>
 
         {showTimerMenu ? (
-          <div className="mt-3 space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3">
-            <p className="text-xs uppercase tracking-[0.12em] text-white/65">Sleep Timer</p>
+          <div className="mt-3 space-y-2 rounded-2xl border border-border bg-muted/50 p-3">
+            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Sleep Timer</p>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
@@ -385,7 +387,7 @@ export const NowPlayingPage = () => {
                 placeholder="Custom min"
                 value={customMinutes}
                 onChange={(e) => setCustomMinutes(e.target.value)}
-                className="h-9 w-28 rounded-full border border-white/20 bg-black/40 px-3 text-sm outline-none placeholder:text-white/35 focus:border-white/45"
+                className="h-9 w-28 rounded-full border border-border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary"
                 aria-label="Custom sleep minutes"
               />
               <Button
@@ -402,7 +404,7 @@ export const NowPlayingPage = () => {
           </div>
         ) : null}
 
-        {status ? <p className="mt-2 text-center text-xs text-white/70">{status}</p> : null}
+        {status ? <p className="mt-2 text-center text-xs text-muted-foreground">{status}</p> : null}
       </div>
     </section>
   );

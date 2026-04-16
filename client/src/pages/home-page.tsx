@@ -337,23 +337,25 @@ export const HomePage = () => {
             <h1 className="text-xl font-semibold tracking-wide">
               {mode === "music" ? "Top Songs" : "Top Videos"}
             </h1>
-            <p className="text-xs text-white/60">Fresh picks for you</p>
+            <p className="text-xs text-muted-foreground">Fresh picks for you</p>
           </div>
           <Button variant="outline" size="icon" onClick={onRefreshHome} aria-label="Refresh home feed">
             <RefreshCw className={`h-4 w-4 ${homeFeed.isFetching ? "animate-spin" : ""}`} />
           </Button>
         </div>
-        {realtimeProgressText ? <p className="text-xs text-cyan-200/90">{realtimeProgressText}</p> : null}
+        {realtimeProgressText ? (
+          <p className="text-xs text-cyan-700 dark:text-cyan-200/90">{realtimeProgressText}</p>
+        ) : null}
       </header>
 
       {actionMessage ? (
-        <p className="rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-sm text-white/80">
+        <p className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm text-foreground">
           {actionMessage}
         </p>
       ) : null}
 
       {homeFeed.isError ? (
-        <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-200">
           Could not refresh home feed right now.
         </p>
       ) : null}
@@ -373,7 +375,7 @@ export const HomePage = () => {
           ))}
         </div>
         {mode === "music" && visibleItems.length === 0 ? (
-          <p className="text-sm text-white/60">No pure songs found right now.</p>
+          <p className="text-sm text-muted-foreground">No pure songs found right now.</p>
         ) : null}
         <div ref={loaderRef} className="h-3" />
       </section>
@@ -381,7 +383,7 @@ export const HomePage = () => {
       {(homeFeed.isLoading || homeFeed.isFetchingNextPage) && visibleItems.length === 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="h-28 animate-pulse rounded-xl bg-white/5" />
+            <div key={index} className="h-28 animate-pulse rounded-xl bg-muted/50" />
           ))}
         </div>
       )}

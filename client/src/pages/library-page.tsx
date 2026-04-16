@@ -99,7 +99,7 @@ export const LibraryPage = () => {
       <section className="space-y-4">
         <h1 className="text-3xl font-bold uppercase tracking-[0.16em]">Library</h1>
         <Card>
-          <p className="text-sm text-white/70">
+          <p className="text-sm text-muted-foreground">
             Sign in from Profile to save and view your favorites.
           </p>
         </Card>
@@ -111,19 +111,19 @@ export const LibraryPage = () => {
     <section className="space-y-4">
       <header>
         <h1 className="text-3xl font-bold uppercase tracking-[0.16em]">Library</h1>
-        <p className="text-sm text-white/60">
+        <p className="text-sm text-muted-foreground">
           Showing favorite {mode === "music" ? "songs" : "videos"} only.
         </p>
       </header>
 
       {statusMessage ? (
-        <p className="rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-sm text-white/80">
+        <p className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm text-foreground">
           {statusMessage}
         </p>
       ) : null}
 
       {playlistsQuery.isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-white/60">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading favorites...
         </div>
@@ -131,7 +131,7 @@ export const LibraryPage = () => {
 
       {mode === "music" ? (
         <Card className="overflow-hidden p-0">
-          <div className="grid grid-cols-[42px_minmax(0,1fr)_90px_90px] gap-3 border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.12em] text-white/50">
+          <div className="grid grid-cols-[42px_minmax(0,1fr)_90px_90px] gap-3 border-b border-border px-4 py-3 text-xs uppercase tracking-[0.12em] text-muted-foreground">
             <span>#</span>
             <span>Song</span>
             <span>Duration</span>
@@ -140,17 +140,17 @@ export const LibraryPage = () => {
           {favoriteItems.map((item, index) => (
             <div
               key={item.id}
-              className="grid grid-cols-[42px_minmax(0,1fr)_90px_90px] items-center gap-3 border-b border-white/5 px-4 py-3 text-sm last:border-b-0"
+              className="grid grid-cols-[42px_minmax(0,1fr)_90px_90px] items-center gap-3 border-b border-border/70 px-4 py-3 text-sm last:border-b-0"
             >
-              <span className="text-white/50">{index + 1}</span>
+              <span className="text-muted-foreground">{index + 1}</span>
               <div className="flex min-w-0 items-center gap-3">
                 <img src={item.thumbnail} alt={item.title} className="h-10 w-10 rounded-md object-cover" />
                 <span className="min-w-0">
                   <span className="block truncate font-medium">{item.title}</span>
-                  <span className="block truncate text-xs text-white/60">{item.creator}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{item.creator}</span>
                 </span>
               </div>
-              <span className="text-white/60">{formatDuration(item.duration)}</span>
+              <span className="text-muted-foreground">{formatDuration(item.duration)}</span>
               <div className="flex justify-end">
                 <Button size="icon" onClick={() => void playMedia(item)} disabled={loadingItemId === item.id}>
                   {loadingItemId === item.id ? (
@@ -163,7 +163,7 @@ export const LibraryPage = () => {
             </div>
           ))}
           {!playlistsQuery.isLoading && favoriteItems.length === 0 ? (
-            <p className="px-4 py-5 text-sm text-white/60">
+            <p className="px-4 py-5 text-sm text-muted-foreground">
               No favorite songs yet. Add songs from Home or Search.
             </p>
           ) : null}
@@ -180,7 +180,7 @@ export const LibraryPage = () => {
           ))}
           {!playlistsQuery.isLoading && favoriteItems.length === 0 ? (
             <Card className="sm:col-span-2 lg:col-span-3">
-              <p className="text-sm text-white/60">
+              <p className="text-sm text-muted-foreground">
                 No favorite videos yet. Add videos from Home or Search.
               </p>
             </Card>

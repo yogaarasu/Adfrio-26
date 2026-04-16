@@ -304,20 +304,20 @@ export const GlobalVideoPlayer = () => {
 
   return (
     <div
-      className={`fixed inset-0 z-[60] flex flex-col bg-black/95 transition-transform duration-300 ease-out ${
+      className={`fixed inset-0 z-[60] flex flex-col bg-background/95 transition-transform duration-300 ease-out ${
         isVisible ? "translate-y-0" : "translate-y-full"
       }`}
       style={{
-        backgroundImage: `linear-gradient(180deg, ${accentSoft} 0%, rgba(0,0,0,0.95) 24%, rgba(0,0,0,0.99) 100%)`,
+        backgroundImage: `linear-gradient(180deg, ${accentSoft} 0%, hsl(var(--background) / 0.95) 24%, hsl(var(--background)) 100%)`,
       }}
     >
-      <header className="z-30 border-b border-white/10 bg-black">
+      <header className="z-30 border-b border-border/80 bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-12 w-full max-w-[1400px] items-center justify-start px-3">
           <Button
             variant="ghost"
             size="icon"
             onClick={clearVideo}
-            className="bg-black/40 hover:bg-black/70"
+            className="bg-muted/70 hover:bg-muted"
             aria-label="Close video player"
           >
             <ChevronDown className="h-5 w-5" />
@@ -339,12 +339,12 @@ export const GlobalVideoPlayer = () => {
           <div className="lg:grid lg:grid-cols-[minmax(0,4fr)_minmax(0,1fr)] lg:gap-6">
             <div
               ref={videoFrameRef}
-              className="sticky top-0 z-20 w-full overflow-hidden rounded-xl border border-white/10 bg-black lg:relative lg:top-auto lg:col-start-1 lg:row-start-1"
+              className="sticky top-0 z-20 w-full overflow-hidden rounded-xl border border-border bg-card lg:relative lg:top-auto lg:col-start-1 lg:row-start-1"
               style={{ aspectRatio: "16 / 9" }}
             >
               {isBuffering && !videoError ? (
                 <div className="absolute inset-0 z-10 flex items-center justify-center">
-                  <Loader2 className="h-12 w-12 animate-spin text-white/70" />
+                  <Loader2 className="h-12 w-12 animate-spin text-foreground/70" />
                 </div>
               ) : null}
               <div className="pointer-events-none absolute right-2 top-2 z-20 h-8 w-20 rounded-md bg-black/92" aria-hidden="true" />
@@ -435,7 +435,7 @@ export const GlobalVideoPlayer = () => {
                 <span className="flex items-start justify-between gap-3">
                   <h3 className="text-base font-semibold leading-snug md:text-lg">{current.title}</h3>
                   <ChevronDown
-                    className={`mt-0.5 h-4 w-4 shrink-0 text-white/70 transition-transform ${
+                    className={`mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
                       descriptionOpen ? "rotate-180" : "rotate-0"
                     }`}
                   />
@@ -445,7 +445,7 @@ export const GlobalVideoPlayer = () => {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white/90"
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-4 py-2 text-sm font-medium text-foreground"
                   aria-label="Like video"
                 >
                   <ThumbsUp className="h-4 w-4" />
@@ -455,7 +455,7 @@ export const GlobalVideoPlayer = () => {
                   type="button"
                   onClick={() => void addCurrentToFavorites()}
                   disabled={savingToPlaylist}
-                  className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white/90 transition hover:bg-white/15 disabled:opacity-70"
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-4 py-2 text-sm font-medium text-foreground transition hover:bg-muted disabled:opacity-70"
                   aria-label="Add video to playlist"
                 >
                   {savingToPlaylist ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -463,7 +463,7 @@ export const GlobalVideoPlayer = () => {
                 </button>
               </div>
 
-              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/50 p-3">
                 {channelAvatar ? (
                   <img
                     src={channelAvatar}
@@ -471,7 +471,7 @@ export const GlobalVideoPlayer = () => {
                     className="h-10 w-10 rounded-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-sm font-bold">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-bold">
                     {channelInitial}
                   </div>
                 )}
@@ -480,18 +480,20 @@ export const GlobalVideoPlayer = () => {
                 </div>
               </div>
 
-              {saveMessage ? <p className="text-xs text-white/70">{saveMessage}</p> : null}
+              {saveMessage ? <p className="text-xs text-muted-foreground">{saveMessage}</p> : null}
             </section>
 
             <aside className="mt-5 space-y-2 lg:col-start-2 lg:row-span-2 lg:mt-0 lg:max-h-[calc(100vh-8.5rem)] lg:overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              {relatedError ? <p className="text-sm text-amber-300">{relatedError}</p> : null}
+              {relatedError ? (
+                <p className="text-sm text-amber-700 dark:text-amber-300">{relatedError}</p>
+              ) : null}
               <div className="space-y-2">
                 {relatedItems.map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => void playRelated(item)}
-                    className="flex w-full items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-2 text-left transition hover:border-white/20 hover:bg-white/10"
+                    className="flex w-full items-start gap-3 rounded-xl border border-border bg-muted/50 p-2 text-left transition hover:bg-muted"
                     disabled={loadingRelatedId === item.id}
                   >
                     <div className="relative h-14 w-24 shrink-0 overflow-hidden rounded-lg md:h-16 md:w-28">
@@ -504,8 +506,8 @@ export const GlobalVideoPlayer = () => {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="line-clamp-2 text-sm font-medium">{item.title}</p>
-                      <p className="mt-1 line-clamp-1 text-xs text-white/65">{item.creator}</p>
-                      <p className="mt-1 text-xs text-white/40">{formatDuration(item.duration)}</p>
+                      <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{item.creator}</p>
+                      <p className="mt-1 text-xs text-muted-foreground/90">{formatDuration(item.duration)}</p>
                     </div>
                   </button>
                 ))}
@@ -528,18 +530,20 @@ export const GlobalVideoPlayer = () => {
           aria-label="Close description"
         />
         <div
-          className={`pointer-events-auto absolute inset-0 overflow-hidden rounded-t-2xl border-t border-white/15 bg-[#111] transition-transform duration-300 ${
+          className={`pointer-events-auto absolute inset-0 overflow-hidden rounded-t-2xl border-t border-border bg-card transition-transform duration-300 ${
             descriptionOpen ? "translate-y-0" : "translate-y-full"
           }`}
         >
-          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-            <h4 className="text-sm font-semibold uppercase tracking-[0.12em] text-white/85">Description</h4>
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <h4 className="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground">Description</h4>
             <Button variant="ghost" size="icon" onClick={() => setDescriptionOpen(false)} aria-label="Close description panel">
               <X className="h-4 w-4" />
             </Button>
           </div>
           <div className="h-[calc(100%-54px)] overflow-y-auto overflow-x-hidden px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <p className="whitespace-pre-wrap break-words text-sm text-white/80 [overflow-wrap:anywhere]">{descriptionText}</p>
+            <p className="whitespace-pre-wrap break-words text-sm text-foreground [overflow-wrap:anywhere]">
+              {descriptionText}
+            </p>
           </div>
         </div>
       </div>

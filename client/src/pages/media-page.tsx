@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { mediaApi, playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
 import type { MediaItem, MediaType } from "@/types/media";
@@ -20,16 +20,14 @@ export const MediaPage = ({ type }: Props) => {
 
   const search = useMediaSearch(query, type);
 
-  // Deduplicate across all pages (pages can return overlapping items from shuffle)
   const items = useMemo(() => {
     const seen = new Set<string>();
     const all: MediaItem[] = [];
     for (const page of search.data?.pages ?? []) {
       for (const item of page.items) {
-        if (!seen.has(item.id)) {
-          seen.add(item.id);
-          all.push(item);
-        }
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        all.push(item);
       }
     }
     return all;
@@ -40,35 +38,29 @@ export const MediaPage = ({ type }: Props) => {
     mediaApi.prefetchStreams(items.slice(0, 8).map((item) => item.id));
   }, [items, type]);
 
-  // Stable infinite scroll trigger
   const triggerNextPage = useCallback(() => {
     if (search.hasNextPage && !search.isFetchingNextPage) {
       void search.fetchNextPage();
     }
   }, [search]);
-
   const loaderRef = useInfiniteTrigger(triggerNextPage);
 
-  // ------------------------------------------------------------------
-  // Play handler — simplified: for music, play immediately via YouTube
-  // IFrame (ReactPlayer). For video, fetch stream info for related videos
-  // but still use YouTube URL for the actual player.
-  // ------------------------------------------------------------------
   const onPlay = async (item: MediaItem) => {
     setActionMessage(null);
     setLoadingItemId(item.id);
 
     try {
       if (item.type === "music") {
-        playAudio(
-          item,
-          { url: `https://www.youtube.com/watch?v=${item.id}`, mimeType: "audio/mpeg" },
-          items
-        );
-      } else {
-        const started = playVideo(item, [], []);
-        if (!started) return;
-        mediaApi.streams(item.id).then((stream) => {
+        playAudio(item, { url: `https://www.youtube.com/watch?v=${item.id}`, mimeType: "audio/mpeg" }, items);
+        return;
+      }
+
+      const started = playVideo(item, [], []);
+      if (!started) return;
+
+      mediaApi
+        .streams(item.id)
+        .then((stream) => {
           updateVideoSession(item.id, {
             related: stream.related ?? [],
             description: stream.description,
@@ -76,10 +68,8 @@ export const MediaPage = ({ type }: Props) => {
             uploaderAvatarUrl: stream.uploaderAvatarUrl ?? null,
             likes: stream.likes ?? null
           });
-        }).catch(() => {
-          // Related fetch failed — video still plays, just no related list
-        });
-      }
+        })
+        .catch(() => undefined);
     } catch {
       setActionMessage("Playback failed. Please try another item.");
     } finally {
@@ -87,9 +77,6 @@ export const MediaPage = ({ type }: Props) => {
     }
   };
 
-  // ------------------------------------------------------------------
-  // Add to playlist handler
-  // ------------------------------------------------------------------
   const onAdd = async (item: MediaItem) => {
     setActionMessage(null);
     try {
@@ -107,23 +94,19 @@ export const MediaPage = ({ type }: Props) => {
         artwork: item.thumbnail,
         duration: item.duration
       });
-      setActionMessage("Added to Favorites ✓");
+      setActionMessage("Added to Favorites");
     } catch {
       setActionMessage("Could not add this item to playlist.");
     }
   };
 
-  // ------------------------------------------------------------------
-  // Render
-  // ------------------------------------------------------------------
   return (
     <section className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold uppercase tracking-[0.18em]">
           {type === "music" ? "Music Hub" : "Video Hub"}
         </h1>
-        <p className="text-sm text-white/60">Ad-free streaming · Infinite discovery</p>
+        <p className="text-sm text-muted-foreground">Ad-free streaming · Infinite discovery</p>
       </div>
 
       <SearchBox
@@ -131,35 +114,32 @@ export const MediaPage = ({ type }: Props) => {
         onChange={setQuery}
         placeholder={
           type === "music"
-            ? "Search songs, artists, albums…"
-            : "Search videos and channels…"
+            ? "Search songs, artists, albums..."
+            : "Search videos and channels..."
         }
       />
 
-      {/* Status messages */}
-      {search.isLoading && (
+      {search.isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-28 animate-pulse rounded-xl bg-white/5"
-            />
+            <div key={i} className="h-28 animate-pulse rounded-xl bg-muted/50" />
           ))}
         </div>
-      )}
-      {search.isError && (
-        <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          Failed to load media — check your connection or try another search.
+      ) : null}
+
+      {search.isError ? (
+        <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+          Failed to load media. Check your connection or try another search.
         </p>
-      )}
-      {actionMessage && (
-        <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+      ) : null}
+
+      {actionMessage ? (
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           {actionMessage}
         </p>
-      )}
+      ) : null}
 
-      {/* Grid */}
-      {!search.isLoading && (
+      {!search.isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((item) => (
             <MediaCard
@@ -171,17 +151,16 @@ export const MediaPage = ({ type }: Props) => {
             />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Infinite scroll trigger */}
       <div ref={loaderRef} className="h-10" />
-      {search.isFetchingNextPage && (
+      {search.isFetchingNextPage ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-28 animate-pulse rounded-xl bg-white/5" />
+            <div key={i} className="h-28 animate-pulse rounded-xl bg-muted/50" />
           ))}
         </div>
-      )}
+      ) : null}
     </section>
   );
 };

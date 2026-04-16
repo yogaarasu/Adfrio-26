@@ -10,7 +10,7 @@ export const SleepTimer = () => {
 
   return (
     <div className="flex items-center gap-2">
-      <Clock3 className="h-4 w-4 text-white/70" />
+      <Clock3 className="h-4 w-4 text-muted-foreground" />
       {options.map((min) => (
         <Button key={min} variant="outline" size="sm" onClick={() => setSleepTimer(min)}>
           {min}m
@@ -20,7 +20,9 @@ export const SleepTimer = () => {
         Off
       </Button>
       {sleepUntil ? (
-        <span className="text-xs text-white/60">Ends {new Date(sleepUntil).toLocaleTimeString()}</span>
+        <span className="text-xs text-muted-foreground">
+          Ends {new Date(sleepUntil).toLocaleTimeString()}
+        </span>
       ) : null}
     </div>
   );

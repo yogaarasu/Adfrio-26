@@ -190,36 +190,38 @@ export const SearchPage = () => {
         <h1 className="text-3xl font-bold uppercase tracking-[0.16em]">
           {mode === "music" ? "Songs Search" : "Videos Search"}
         </h1>
-        <p className="text-sm text-white/60">Type what you want and we will find the best match.</p>
+        <p className="text-sm text-muted-foreground">Type what you want and we will find the best match.</p>
       </header>
 
       <SearchBox value={query} onChange={setQuery} placeholder={mode === "music" ? "Search songs..." : "Search videos..."} />
 
       {realtimeProgressText && query.trim().length > 0 ? (
-        <p className="text-xs text-cyan-200/90">{realtimeProgressText}</p>
+        <p className="text-xs text-cyan-700 dark:text-cyan-200/90">{realtimeProgressText}</p>
       ) : null}
 
       {correctedQuery ? (
-        <p className="text-xs text-white/60">
-          Showing improved results for <span className="font-semibold text-white">{correctedQuery}</span>
+        <p className="text-xs text-muted-foreground">
+          Showing improved results for <span className="font-semibold text-foreground">{correctedQuery}</span>
         </p>
       ) : null}
 
       {appliedQuery ? (
-        <p className="text-xs text-white/55">
-          Interpreted as <span className="font-semibold text-white">{appliedQuery}</span>
+        <p className="text-xs text-muted-foreground">
+          Interpreted as <span className="font-semibold text-foreground">{appliedQuery}</span>
         </p>
       ) : null}
 
       {statusMessage ? (
-        <p className="rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-sm text-white/80">
+        <p className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm text-foreground">
           {statusMessage}
         </p>
       ) : null}
 
       {showEmptyState ? (
         <Card>
-          <p className="text-sm text-white/70">Start typing to search {mode === "music" ? "songs" : "videos"}.</p>
+          <p className="text-sm text-muted-foreground">
+            Start typing to search {mode === "music" ? "songs" : "videos"}.
+          </p>
         </Card>
       ) : null}
 
@@ -245,7 +247,7 @@ export const SearchPage = () => {
       {(search.isLoading || search.isFetchingNextPage) && !showEmptyState ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="h-28 animate-pulse rounded-xl bg-white/5" />
+            <div key={index} className="h-28 animate-pulse rounded-xl bg-muted/50" />
           ))}
         </div>
       ) : null}

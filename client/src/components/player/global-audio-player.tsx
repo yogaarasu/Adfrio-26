@@ -468,12 +468,12 @@ export const GlobalAudioPlayer = () => {
 
       {!video.active && !hideMiniBar ? (
         <div
-          className="fixed bottom-16 left-0 right-0 z-50 border-t border-white/20 bg-black/95 px-4 py-3 md:bottom-0"
+          className="fixed bottom-16 left-0 right-0 z-50 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
           role="region"
           aria-label="Audio player"
         >
           <div
-            className="group mb-3 h-1 w-full cursor-pointer rounded-full bg-white/15"
+            className="group mb-3 h-1 w-full cursor-pointer rounded-full bg-border/90"
             onClick={(e) => {
               e.stopPropagation();
               if (!activeDuration) return;
@@ -502,12 +502,12 @@ export const GlobalAudioPlayer = () => {
               className="relative h-full rounded-full"
               style={{ width: `${progress}%`, backgroundColor: accentStrong }}
             >
-              <div className="absolute right-0 top-1/2 h-2.5 w-2.5 -translate-y-1/2 translate-x-1 rounded-full bg-white opacity-0 transition-opacity group-hover:opacity-100" />
+              <div className="absolute right-0 top-1/2 h-2.5 w-2.5 -translate-y-1/2 translate-x-1 rounded-full bg-foreground opacity-0 transition-opacity group-hover:opacity-100" />
             </div>
           </div>
 
           {audioError ? (
-            <div className="mb-2 flex items-center gap-2 rounded-lg bg-red-500/20 px-3 py-1.5 text-xs text-red-300">
+            <div className="mb-2 flex items-center gap-2 rounded-lg bg-red-500/20 px-3 py-1.5 text-xs text-red-700 dark:text-red-300">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               <span>{audioError}</span>
             </div>
@@ -525,15 +525,15 @@ export const GlobalAudioPlayer = () => {
                   openSongSheet();
                 }
               }}
-              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl p-1 text-left transition hover:bg-white/5"
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl p-1 text-left transition hover:bg-muted/60"
               aria-label="Open now playing details"
             >
               <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg">
                 {current.thumbnail ? (
                   <img src={current.thumbnail} alt={current.title} className="h-full w-full object-cover" />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-white/10">
-                    <Music className="h-5 w-5 text-white/50" />
+                  <div className="flex h-full w-full items-center justify-center bg-muted">
+                    <Music className="h-5 w-5 text-muted-foreground" />
                   </div>
                 )}
                 {isLoading ? (
@@ -545,8 +545,8 @@ export const GlobalAudioPlayer = () => {
 
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{current.title}</p>
-                <p className="truncate text-xs text-white/60">{current.creator}</p>
-                <p className="text-xs text-white/40">
+                <p className="truncate text-xs text-muted-foreground">{current.creator}</p>
+                <p className="text-xs text-muted-foreground/90">
                   {formatDuration(Math.floor(displayTime))} / {formatDuration(Math.floor(activeDuration))}
                 </p>
               </div>
@@ -621,13 +621,13 @@ export const GlobalAudioPlayer = () => {
             </div>
 
             <div className="hidden items-center gap-2 md:flex" onClick={(e) => e.stopPropagation()}>
-              <span className="hidden text-xs text-white/50 lg:inline">
+              <span className="hidden text-xs text-muted-foreground lg:inline">
                 {formatDuration(Math.floor(displayTime))} / {formatDuration(Math.floor(activeDuration))}
               </span>
               <button
                 onClick={onToggleMute}
                 aria-label={isMuted ? "Unmute" : "Mute"}
-                className="text-white/60 transition-colors hover:text-white"
+                className="text-muted-foreground transition-colors hover:text-foreground"
               >
                 {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
               </button>
@@ -643,10 +643,10 @@ export const GlobalAudioPlayer = () => {
                   setVolume(val);
                   if (val > 0 && isMuted) setIsMuted(false);
                 }}
-                className="h-1 w-24 appearance-none rounded-full bg-white/20 md:w-28 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border-0 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0"
+                className="h-1 w-24 appearance-none rounded-full bg-border md:w-28 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground [&::-webkit-slider-thumb]:border-0 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-foreground [&::-moz-range-thumb]:border-0"
                 style={{
                   accentColor: accentStrong,
-                  background: `linear-gradient(to right, ${accentStrong} 0%, ${accentStrong} ${volumeFill}%, rgba(255,255,255,0.2) ${volumeFill}%, rgba(255,255,255,0.2) 100%)`,
+                  background: `linear-gradient(to right, ${accentStrong} 0%, ${accentStrong} ${volumeFill}%, hsl(var(--border)) ${volumeFill}%, hsl(var(--border)) 100%)`,
                 }}
                 aria-label="Volume"
               />

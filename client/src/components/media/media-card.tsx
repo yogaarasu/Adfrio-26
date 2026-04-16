@@ -44,10 +44,12 @@ export const MediaCard = ({
         className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
       />
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-      <Badge className="absolute right-3 top-3 bg-black/60">{formatDuration(item.duration)}</Badge>
+      <Badge className="absolute right-3 top-3 border-white/30 bg-black/60 text-white/90">
+        {formatDuration(item.duration)}
+      </Badge>
       <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2">
         <div>
-          <p className="line-clamp-1 text-sm font-semibold">{item.title}</p>
+          <p className="line-clamp-1 text-sm font-semibold text-white">{item.title}</p>
           <p className="line-clamp-1 text-xs text-white/70">{item.creator}</p>
         </div>
         <div className="flex gap-2">

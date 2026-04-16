@@ -70,21 +70,23 @@ export const AccountPage = () => {
       {user ? (
         <Card className="space-y-3">
           <p className="text-lg font-semibold">{user.name}</p>
-          <p className="text-sm text-white/70">{user.email}</p>
+          <p className="text-sm text-muted-foreground">{user.email}</p>
           <Button onClick={logout}>Log out</Button>
         </Card>
       ) : (
         <>
           <Card className="space-y-3">
-            <h2 className="text-sm uppercase tracking-[0.12em] text-white/70">Google OAuth</h2>
+            <h2 className="text-sm uppercase tracking-[0.12em] text-muted-foreground">Google OAuth</h2>
             <Button onClick={() => googleLogin()} disabled={googleLoading}>
               {googleLoading ? "Connecting..." : "Continue with Google"}
             </Button>
-            <p className="text-xs text-white/60">Authorization Code flow (server-side token exchange)</p>
+            <p className="text-xs text-muted-foreground">
+              Authorization Code flow (server-side token exchange)
+            </p>
           </Card>
 
           <Card className="space-y-3">
-            <h2 className="text-sm uppercase tracking-[0.12em] text-white/70">OTP Login</h2>
+            <h2 className="text-sm uppercase tracking-[0.12em] text-muted-foreground">OTP Login</h2>
             <Input placeholder="Name" value={name} onChange={(event) => setName(event.target.value)} />
             <Input placeholder="Email" value={email} onChange={(event) => setEmail(event.target.value)} />
             {!otpSent ? (
@@ -99,7 +101,7 @@ export const AccountPage = () => {
         </>
       )}
 
-      {status ? <p className="text-sm text-white/70">{status}</p> : null}
+      {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
     </section>
   );
 };

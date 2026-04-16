@@ -5,6 +5,7 @@ import { OAuth2Client } from "google-auth-library";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../config/env.js";
+import { PlaylistModel } from "../models/Playlist.js";
 import { UserModel } from "../models/User.js";
 import { sendOtpEmail } from "../services/mailer.js";
 import {
@@ -68,6 +69,18 @@ const signupVerifySchema = z.object({
 const signinSchema = z.object({
   email: z.string().email(),
   password: z
+    .string()
+    .min(8)
+    .max(64)
+    .refine(
+      (value) => STRONG_PASSWORD_REGEX.test(value),
+      "Password must include upper, lower, number and special character"
+    ),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(8).max(64),
+  newPassword: z
     .string()
     .min(8)
     .max(64)
@@ -659,6 +672,58 @@ export const googleAuthCallback = async (req: Request, res: Response): Promise<R
 
   res.redirect(redirectUrl.toString());
   return;
+};
+
+export const changePassword = async (req: Request, res: Response): Promise<Response> => {
+  if (!req.user?.userId) {
+    return sendError(res, 401, "Unauthorized");
+  }
+
+  const parsed = changePasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, parsed.error.issues[0]?.message ?? "Invalid request payload");
+  }
+
+  if (parsed.data.currentPassword === parsed.data.newPassword) {
+    return sendError(res, 400, "New password must be different from current password");
+  }
+
+  const user = await UserModel.findById(req.user.userId);
+  if (!user) {
+    return sendError(res, 404, "User not found");
+  }
+
+  if (!user.passwordHash) {
+    return sendError(res, 400, "Password change is available only for password accounts");
+  }
+
+  const validCurrentPassword = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
+  if (!validCurrentPassword) {
+    return sendError(res, 401, "Current password is incorrect");
+  }
+
+  user.passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
+  await user.save();
+
+  return res.json({ message: "Password updated successfully" });
+};
+
+export const deleteAccount = async (req: Request, res: Response): Promise<Response> => {
+  if (!req.user?.userId) {
+    return sendError(res, 401, "Unauthorized");
+  }
+
+  const existingUser = await UserModel.exists({ _id: req.user.userId });
+  if (!existingUser) {
+    return sendError(res, 404, "User not found");
+  }
+
+  await Promise.all([
+    PlaylistModel.deleteMany({ userId: req.user.userId }),
+    UserModel.deleteOne({ _id: req.user.userId })
+  ]);
+
+  return res.json({ message: "Account deleted successfully" });
 };
 
 export const me = async (req: Request, res: Response): Promise<Response> => {

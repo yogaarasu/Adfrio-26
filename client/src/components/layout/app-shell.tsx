@@ -14,7 +14,10 @@ export const AppShell = () => {
 
   return (
     <div
-      className={cn("min-h-screen", isAuthRoute ? "bg-[#ececec] text-[#111]" : "bg-black text-white")}
+      className={cn(
+        "min-h-screen",
+        isAuthRoute ? "bg-[#ececec] text-[#111]" : "bg-background text-foreground"
+      )}
     >
       {!isAuthRoute ? <TopNav /> : null}
       <main
