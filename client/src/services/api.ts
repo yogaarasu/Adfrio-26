@@ -1,6 +1,6 @@
 import axios, { AxiosError } from "axios";
 import { API_URL } from "@/lib/constants";
-import type { MediaItem, MediaType, PlaylistItem, StreamResponse } from "@/types/media";
+import type { MediaItem, MediaType, PlaylistItem, PlaylistSummary, StreamResponse } from "@/types/media";
 
 const api = axios.create({
   baseURL: API_URL,
@@ -189,14 +189,11 @@ export const mediaApi = {
 export const playlistApi = {
   list: async () => {
     const { data } = await api.get("/playlists");
-    return data.playlists as Array<{
-      _id: string;
-      name: string;
-      description: string;
-      items: PlaylistItem[];
-    }>;
+    return data.playlists as PlaylistSummary[];
   },
-  create: (name: string, description: string) => api.post("/playlists", { name, description }),
+  create: (name: string, description: string, playlistType: MediaType) =>
+    api.post("/playlists", { name, description, playlistType }),
   addItem: (playlistId: string, item: PlaylistItem) => api.post(`/playlists/${playlistId}/items`, item),
-  removeItem: (playlistId: string, mediaId: string) => api.delete(`/playlists/${playlistId}/items/${mediaId}`)
+  removeItem: (playlistId: string, mediaId: string) => api.delete(`/playlists/${playlistId}/items/${mediaId}`),
+  delete: (playlistId: string) => api.delete(`/playlists/${playlistId}`),
 };

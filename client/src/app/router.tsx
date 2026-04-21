@@ -18,6 +18,7 @@ export const router = createBrowserRouter([
       { path: "home", element: <HomePage /> },
       { path: "search", element: <SearchPage /> },
       { path: "library", element: <LibraryPage /> },
+      { path: "library/:playlistId", element: <LibraryPage /> },
       { path: "profile", element: <ProfilePage /> },
       { path: "sign-in", element: <SignInPage /> },
       { path: "sign-up", element: <SignUpPage /> },

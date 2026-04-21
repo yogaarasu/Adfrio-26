@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, Loader2, Plus, ThumbsUp, X } from "lucide-react";
+import { ChevronDown, Clock3, ListPlus, Loader2, ThumbsUp, X } from "lucide-react";
 import _ReactPlayer from "react-player";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { mediaApi, playlistApi } from "@/services/api";
+import { mediaApi } from "@/services/api";
+import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet";
 import { usePlayerStore } from "@/store/player-store";
 import { accentColorFromSeed } from "@/lib/accent-color";
 import { formatDuration } from "@/lib/utils";
 import type { MediaItem } from "@/types/media";
 
 const ReactPlayer = _ReactPlayer as any;
+const SLEEP_OPTIONS = [10, 20, 30, 45, 60];
 
 const YT_ERROR_LABELS: Record<number, string> = {
   2: "Invalid video ID",
@@ -56,13 +59,14 @@ export const GlobalVideoPlayer = () => {
   const playing = usePlayerStore((state) => state.playing);
   const playVideo = usePlayerStore((state) => state.playVideo);
   const updateVideoSession = usePlayerStore((state) => state.updateVideoSession);
+  const setSleepTimer = usePlayerStore((state) => state.setSleepTimer);
 
   const [relatedError, setRelatedError] = useState<string | null>(null);
   const [loadingRelatedId, setLoadingRelatedId] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [isBuffering, setIsBuffering] = useState(true);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [savingToPlaylist, setSavingToPlaylist] = useState(false);
+  const [sleepSheetOpen, setSleepSheetOpen] = useState(false);
+  const [playlistSheetOpen, setPlaylistSheetOpen] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
@@ -112,7 +116,8 @@ export const GlobalVideoPlayer = () => {
     setIsBuffering(true);
     setCurrentTime(0);
     setDuration(0);
-    setSaveMessage(null);
+    setSleepSheetOpen(false);
+    setPlaylistSheetOpen(false);
     setDescriptionOpen(false);
     setDescriptionTop(null);
     relatedHydrationAttemptsRef.current.set(current.id, 0);
@@ -216,42 +221,16 @@ export const GlobalVideoPlayer = () => {
     };
   }, [current, hydrateVideoSession, shouldOpen, video.related.length]);
 
-  const addCurrentToFavorites = useCallback(async () => {
-    if (!current || savingToPlaylist) return;
-    setSavingToPlaylist(true);
-    setSaveMessage(null);
-    try {
-      const playlists = await playlistApi.list();
-      let favorites = playlists.find((entry) => entry.name.toLowerCase() === "favorites");
-      if (!favorites) {
-        await playlistApi.create("Favorites", "Auto-generated favorites playlist");
-        const refreshed = await playlistApi.list();
-        favorites = refreshed.find((entry) => entry.name.toLowerCase() === "favorites");
-      }
-      if (!favorites) return;
-
-      await playlistApi.addItem(favorites._id, {
-        mediaId: current.id,
-        mediaType: "video",
-        title: current.title,
-        creator: current.creator,
-        artwork: current.thumbnail,
-        duration: current.duration,
-      });
-      setSaveMessage("Saved to Favorites");
-    } catch {
-      setSaveMessage("Sign in to save videos");
-    } finally {
-      setSavingToPlaylist(false);
-    }
-  }, [current, savingToPlaylist]);
+  const openPlaylistSheet = useCallback(() => {
+    if (!current) return;
+    setPlaylistSheetOpen(true);
+  }, [current]);
 
   const playRelated = useCallback(
     async (item: MediaItem) => {
       if (loadingRelatedId) return;
       setRelatedError(null);
       setLoadingRelatedId(item.id);
-      setSaveMessage(null);
       try {
         const started = playVideo({ ...item, type: "video" }, [], {
           related: video.related,
@@ -335,11 +314,11 @@ export const GlobalVideoPlayer = () => {
           </div>
         ) : null}
 
-        <div className="mx-auto w-full max-w-[1400px] px-4 py-4 pb-24">
+        <div className="mx-auto w-full max-w-[1400px] pb-24">
           <div className="lg:grid lg:grid-cols-[minmax(0,4fr)_minmax(0,1fr)] lg:gap-6">
             <div
               ref={videoFrameRef}
-              className="sticky top-0 z-20 w-full overflow-hidden rounded-xl border border-border bg-card lg:relative lg:top-auto lg:col-start-1 lg:row-start-1"
+              className="sticky top-0 z-20 -mx-4 w-[calc(100%+2rem)] overflow-hidden bg-black sm:-mx-6 sm:w-[calc(100%+3rem)] lg:relative lg:top-auto lg:col-start-1 lg:row-start-1 lg:mx-0 lg:w-full"
               style={{ aspectRatio: "16 / 9" }}
             >
               {isBuffering && !videoError ? (
@@ -347,7 +326,6 @@ export const GlobalVideoPlayer = () => {
                   <Loader2 className="h-12 w-12 animate-spin text-foreground/70" />
                 </div>
               ) : null}
-              <div className="pointer-events-none absolute right-2 top-2 z-20 h-8 w-20 rounded-md bg-black/92" aria-hidden="true" />
 
               <ReactPlayer
                 key={`video-${current.id}`}
@@ -423,7 +401,7 @@ export const GlobalVideoPlayer = () => {
               />
             </div>
 
-            <section className="mt-4 space-y-4 lg:mt-0 lg:col-start-1 lg:row-start-2">
+            <section className="mt-4 space-y-4 px-4 lg:mt-0 lg:col-start-1 lg:row-start-2 lg:px-0">
 
               <button
                 ref={titleTriggerRef}
@@ -453,13 +431,21 @@ export const GlobalVideoPlayer = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void addCurrentToFavorites()}
-                  disabled={savingToPlaylist}
+                  onClick={openPlaylistSheet}
                   className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-4 py-2 text-sm font-medium text-foreground transition hover:bg-muted disabled:opacity-70"
                   aria-label="Add video to playlist"
                 >
-                  {savingToPlaylist ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  <span>Add Playlist</span>
+                  <ListPlus className="h-4 w-4" />
+                  <span>Add</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSleepSheetOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-4 py-2 text-sm font-medium text-foreground transition hover:bg-muted"
+                  aria-label="Open sleep timer options"
+                >
+                  <Clock3 className="h-4 w-4" />
+                  <span>Sleep</span>
                 </button>
               </div>
 
@@ -480,10 +466,9 @@ export const GlobalVideoPlayer = () => {
                 </div>
               </div>
 
-              {saveMessage ? <p className="text-xs text-muted-foreground">{saveMessage}</p> : null}
             </section>
 
-            <aside className="mt-5 space-y-2 lg:col-start-2 lg:row-span-2 lg:mt-0 lg:max-h-[calc(100vh-8.5rem)] lg:overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <aside className="mt-5 space-y-2 px-4 lg:col-start-2 lg:row-span-2 lg:mt-0 lg:max-h-[calc(100vh-8.5rem)] lg:overflow-y-auto lg:px-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {relatedError ? (
                 <p className="text-sm text-amber-700 dark:text-amber-300">{relatedError}</p>
               ) : null}
@@ -547,6 +532,62 @@ export const GlobalVideoPlayer = () => {
           </div>
         </div>
       </div>
+
+      <div
+        className={`fixed inset-0 z-[71] transition-opacity duration-300 ${
+          sleepSheetOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/60"
+          onClick={() => setSleepSheetOpen(false)}
+          aria-label="Close sleep timer sheet"
+        />
+        <section
+          className={`absolute bottom-0 left-0 right-0 rounded-t-3xl border-t border-border bg-card px-4 pb-5 pt-4 transition-transform duration-300 ease-out ${
+            sleepSheetOpen ? "translate-y-0" : "translate-y-full"
+          }`}
+          aria-label="Video sleep timer"
+        >
+          <div className="mx-auto w-full max-w-xl space-y-4">
+            <div className="mx-auto h-1.5 w-12 rounded-full bg-border" />
+            <h2 className="text-base font-semibold">Sleep Timer</h2>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+              {SLEEP_OPTIONS.map((value) => (
+                <Button
+                  key={value}
+                  variant="outline"
+                  onClick={() => {
+                    setSleepTimer(value);
+                    setSleepSheetOpen(false);
+                    toast.success(`Sleep timer set for ${value} minutes.`);
+                  }}
+                >
+                  {value === 60 ? "1 hour" : `${value} min`}
+                </Button>
+              ))}
+            </div>
+            <Button
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setSleepTimer(null);
+                setSleepSheetOpen(false);
+                toast.success("Sleep timer turned off.");
+              }}
+            >
+              Turn Off Sleep Timer
+            </Button>
+          </div>
+        </section>
+      </div>
+
+      <AddToPlaylistSheet
+        open={playlistSheetOpen}
+        item={current}
+        onClose={() => setPlaylistSheetOpen(false)}
+      />
     </div>
   );
 };

@@ -8,7 +8,7 @@ export type JwtPayload = {
 };
 
 export const signJwt = (payload: JwtPayload): string => {
-  const expiresIn = env.JWT_EXPIRES_IN as SignOptions["expiresIn"];
+  const expiresIn: SignOptions["expiresIn"] = "30d";
   return jwt.sign(payload, env.JWT_SECRET, { expiresIn });
 };
 

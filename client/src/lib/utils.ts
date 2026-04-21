@@ -6,10 +6,17 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const formatDuration = (seconds?: number | null): string => {
-  if (!seconds) return "--:--";
-  const min = Math.floor(seconds / 60);
-  const sec = Math.floor(seconds % 60)
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds) || seconds <= 0) return "--:--";
+  const totalSeconds = Math.floor(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const min = Math.floor((totalSeconds % 3600) / 60)
     .toString()
     .padStart(2, "0");
-  return `${min}:${sec}`;
+  const sec = Math.floor(totalSeconds % 60)
+    .toString()
+    .padStart(2, "0");
+  if (hours > 0) {
+    return `${hours}:${min}:${sec}`;
+  }
+  return `${Number(min)}:${sec}`;
 };

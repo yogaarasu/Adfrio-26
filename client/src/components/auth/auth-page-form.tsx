@@ -410,7 +410,7 @@ export const AuthPageForm = ({ mode }: Props) => {
       <Card className="border-0 bg-white p-6 text-neutral-900 shadow-none sm:p-8">
         <header className="space-y-1 text-center">
           <h1 className="text-3xl font-bold tracking-tight">
-            {isSignUp ? "Create your account" : "Welcome back"}
+            {isSignUp ? "Register" : "Welcome back"}
           </h1>
           <p className="text-sm text-neutral-600">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
@@ -418,7 +418,7 @@ export const AuthPageForm = ({ mode }: Props) => {
               to={`${isSignUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`}
               className="font-medium underline"
             >
-              {isSignUp ? "Sign in" : "Sign up"}
+              {isSignUp ? "Login" : "Register"}
             </Link>
           </p>
         </header>

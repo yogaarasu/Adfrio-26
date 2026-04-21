@@ -17,6 +17,7 @@ const playlistSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     name: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
+    playlistType: { type: String, enum: ["music", "video"], default: "music" },
     items: { type: [playlistItemSchema], default: [] }
   },
   { timestamps: true }
@@ -30,6 +31,7 @@ export type PlaylistDocument = {
   userId: Types.ObjectId;
   name: string;
   description: string;
+  playlistType: "music" | "video";
   items: Array<{
     mediaId: string;
     mediaType: "music" | "video";

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { mediaApi, playlistApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
 import type { MediaItem, MediaType } from "@/types/media";
@@ -11,7 +12,6 @@ type Props = { type: MediaType };
 
 export const MediaPage = ({ type }: Props) => {
   const [query, setQuery] = useState("");
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
 
   const playAudio = usePlayerStore((state) => state.playAudio);
@@ -46,7 +46,6 @@ export const MediaPage = ({ type }: Props) => {
   const loaderRef = useInfiniteTrigger(triggerNextPage);
 
   const onPlay = async (item: MediaItem) => {
-    setActionMessage(null);
     setLoadingItemId(item.id);
 
     try {
@@ -71,22 +70,32 @@ export const MediaPage = ({ type }: Props) => {
         })
         .catch(() => undefined);
     } catch {
-      setActionMessage("Playback failed. Please try another item.");
+      toast.error("Playback failed. Please try another item.");
     } finally {
       setLoadingItemId(null);
     }
   };
 
   const onAdd = async (item: MediaItem) => {
-    setActionMessage(null);
+    const targetName = item.type === "music" ? "Favorites" : "Video Favorites";
     try {
       const playlists = await playlistApi.list();
-      if (!playlists[0]) {
-        await playlistApi.create("Favorites", "Auto-generated favorites playlist");
+      const existing = playlists.find(
+        (entry) =>
+          entry.name.toLowerCase() === targetName.toLowerCase() &&
+          entry.playlistType === item.type
+      );
+      if (!existing) {
+        await playlistApi.create(targetName, `Auto-generated ${item.type} playlist`, item.type);
       }
       const latest = await playlistApi.list();
-      if (!latest[0]) return;
-      await playlistApi.addItem(latest[0]._id, {
+      const target = latest.find(
+        (entry) =>
+          entry.name.toLowerCase() === targetName.toLowerCase() &&
+          entry.playlistType === item.type
+      );
+      if (!target) return;
+      await playlistApi.addItem(target._id, {
         mediaId: item.id,
         mediaType: item.type,
         title: item.title,
@@ -94,9 +103,9 @@ export const MediaPage = ({ type }: Props) => {
         artwork: item.thumbnail,
         duration: item.duration
       });
-      setActionMessage("Added to Favorites");
+      toast.success(`Added to ${targetName}.`);
     } catch {
-      setActionMessage("Could not add this item to playlist.");
+      toast.error("Could not add this item to playlist.");
     }
   };
 
@@ -130,12 +139,6 @@ export const MediaPage = ({ type }: Props) => {
       {search.isError ? (
         <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           Failed to load media. Check your connection or try another search.
-        </p>
-      ) : null}
-
-      {actionMessage ? (
-        <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-          {actionMessage}
         </p>
       ) : null}
 

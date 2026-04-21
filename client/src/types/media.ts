@@ -34,3 +34,11 @@ export type PlaylistItem = {
   creator?: string | null;
   duration?: number | null;
 };
+
+export type PlaylistSummary = {
+  _id: string;
+  name: string;
+  description: string;
+  playlistType: MediaType;
+  items: PlaylistItem[];
+};

@@ -5,7 +5,8 @@ import { sendError } from "../utils/http.js";
 
 const createPlaylistSchema = z.object({
   name: z.string().min(1).max(80),
-  description: z.string().max(500).default("")
+  description: z.string().max(500).default(""),
+  playlistType: z.enum(["music", "video"]).default("music")
 });
 
 const playlistItemSchema = z.object({
@@ -23,7 +24,12 @@ export const listPlaylists = async (req: Request, res: Response): Promise<Respon
   }
 
   const playlists = await PlaylistModel.find({ userId: req.user.userId }).sort({ updatedAt: -1 }).lean();
-  return res.json({ playlists });
+  const normalized = playlists.map((playlist) => ({
+    ...playlist,
+    playlistType: playlist.playlistType ?? playlist.items?.[0]?.mediaType ?? "music"
+  }));
+
+  return res.json({ playlists: normalized });
 };
 
 export const createPlaylist = async (req: Request, res: Response): Promise<Response> => {
@@ -40,6 +46,7 @@ export const createPlaylist = async (req: Request, res: Response): Promise<Respo
     userId: req.user.userId,
     name: parsed.data.name,
     description: parsed.data.description,
+    playlistType: parsed.data.playlistType,
     items: []
   });
 
@@ -61,8 +68,20 @@ export const addPlaylistItem = async (req: Request, res: Response): Promise<Resp
     return sendError(res, 404, "Playlist not found");
   }
 
+  const playlistType = playlist.playlistType ?? playlist.items?.[0]?.mediaType;
+  if (playlistType && playlistType !== parsed.data.mediaType) {
+    return sendError(
+      res,
+      400,
+      `Cannot add ${parsed.data.mediaType === "music" ? "song" : "video"} to a ${playlistType === "music" ? "songs" : "videos"} playlist`
+    );
+  }
+
   const exists = playlist.items.some((item) => item.mediaId === parsed.data.mediaId);
   if (!exists) {
+    if (!playlist.playlistType) {
+      playlist.set("playlistType", parsed.data.mediaType);
+    }
     playlist.items.push(parsed.data);
     await playlist.save();
   }

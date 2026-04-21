@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { mediaApi, playlistApi } from "@/services/api";
+import { toast } from "sonner";
+import { mediaApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
 import { usePreferencesStore } from "@/store/preferences-store";
 import { MediaCard } from "@/components/media/media-card";
+import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet";
 import { Button } from "@/components/ui/button";
 import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
@@ -16,16 +18,31 @@ type SearchResponse = {
   nextPageToken: string | null;
 };
 
+const readCachedFeed = (cacheKey: string): MediaItem[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = sessionStorage.getItem(cacheKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { items?: MediaItem[] };
+    if (!Array.isArray(parsed?.items)) return [];
+    return dedupeMediaItems(parsed.items);
+  } catch {
+    return [];
+  }
+};
+
 export const HomePage = () => {
   const mode = usePreferencesStore((state) => state.mode);
   const language = usePreferencesStore((state) => state.language);
+  const cacheKey = `adfrio_home_cache_${mode}_${language}`;
 
-  const [refreshSeed, setRefreshSeed] = useState(() => Math.floor(Date.now() + Math.random() * 100000));
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [refreshSeed, setRefreshSeed] = useState(0);
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
   const [realtimeProgressText, setRealtimeProgressText] = useState<string | null>(null);
-  const [cachedFeedItems, setCachedFeedItems] = useState<MediaItem[]>([]);
+  const [cachedFeedItems, setCachedFeedItems] = useState<MediaItem[]>(() => readCachedFeed(cacheKey));
   const [refreshExcludeIds, setRefreshExcludeIds] = useState<string[]>([]);
+  const [playlistSheetOpen, setPlaylistSheetOpen] = useState(false);
+  const [playlistTargetItem, setPlaylistTargetItem] = useState<MediaItem | null>(null);
   const historicalSeenSongIdsRef = useRef<Set<string>>(
     new Set(
       (() => {
@@ -66,26 +83,9 @@ export const HomePage = () => {
   const updateVideoSession = usePlayerStore((state) => state.updateVideoSession);
   const current = usePlayerStore((state) => state.current);
   const playing = usePlayerStore((state) => state.playing);
-  const cacheKey = `adfrio_home_cache_${mode}_${language}`;
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = sessionStorage.getItem(cacheKey);
-      if (!raw) {
-        setCachedFeedItems([]);
-        return;
-      }
-      const parsed = JSON.parse(raw) as { ts: number; items: MediaItem[] };
-      const age = Date.now() - Number(parsed?.ts ?? 0);
-      if (!Array.isArray(parsed?.items) || age > 8 * 60 * 1000) {
-        setCachedFeedItems([]);
-        return;
-      }
-      setCachedFeedItems(dedupeMediaItems(parsed.items));
-    } catch {
-      setCachedFeedItems([]);
-    }
+    setCachedFeedItems(readCachedFeed(cacheKey));
   }, [cacheKey]);
 
   useEffect(() => {
@@ -139,20 +139,23 @@ export const HomePage = () => {
 
   const homeFeed = useInfiniteQuery({
     queryKey: ["home-feed", mode, language, refreshSeed],
+    enabled: cachedFeedItems.length === 0 || refreshSeed > 0,
     initialPageParam: "",
     queryFn: ({ pageParam }) =>
       mediaApi.homeFeed({
         mode,
         language,
         pageToken: (pageParam as string) || undefined,
-        sessionSeed: refreshSeed,
+        sessionSeed: refreshSeed > 0 ? refreshSeed : undefined,
         realtimeId: connectionId ?? undefined,
       }),
     getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined,
-    staleTime: 45_000,
+    staleTime: Infinity,
     gcTime: 10 * 60 * 1000,
     retry: 1,
     refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = homeFeed;
 
@@ -183,7 +186,7 @@ export const HomePage = () => {
   useEffect(() => {
     if (feedItems.length === 0 || typeof window === "undefined") return;
     const compact = dedupeMediaItems(feedItems).slice(0, 36);
-    sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), items: compact }));
+    sessionStorage.setItem(cacheKey, JSON.stringify({ items: compact }));
     setCachedFeedItems(compact);
   }, [cacheKey, feedItems]);
 
@@ -258,42 +261,13 @@ export const HomePage = () => {
     };
   }, [fetchNextPage, hasNextPage, homeFeed.isLoading, isFetchingNextPage, visibleItems.length]);
 
-  const ensureFavoritesPlaylist = useCallback(async () => {
-    const playlists = await playlistApi.list();
-    let playlist = playlists.find((entry) => entry.name.toLowerCase() === "favorites");
-    if (!playlist) {
-      await playlistApi.create("Favorites", "Auto-generated favorites playlist");
-      const refreshed = await playlistApi.list();
-      playlist = refreshed.find((entry) => entry.name.toLowerCase() === "favorites");
-    }
-    return playlist ?? null;
+  const openPlaylistSheet = useCallback((item: MediaItem) => {
+    setPlaylistTargetItem(item);
+    setPlaylistSheetOpen(true);
   }, []);
-
-  const addToFavorites = useCallback(
-    async (item: MediaItem) => {
-      setActionMessage(null);
-      try {
-        const favorites = await ensureFavoritesPlaylist();
-        if (!favorites) return;
-        await playlistApi.addItem(favorites._id, {
-          mediaId: item.id,
-          mediaType: item.type,
-          title: item.title,
-          creator: item.creator,
-          artwork: item.thumbnail,
-          duration: item.duration,
-        });
-        setActionMessage(`${item.type === "music" ? "Song" : "Video"} added to Favorites`);
-      } catch {
-        setActionMessage("Sign in to save favorites");
-      }
-    },
-    [ensureFavoritesPlaylist]
-  );
 
   const playMedia = useCallback(
     async (item: MediaItem, queue: MediaItem[]) => {
-      setActionMessage(null);
       setLoadingItemId(item.id);
 
       try {
@@ -321,7 +295,7 @@ export const HomePage = () => {
           })
           .catch(() => undefined);
       } catch {
-        setActionMessage("Playback failed. Please try another item.");
+        toast.error("Playback failed. Please try another item.");
       } finally {
         setLoadingItemId(null);
       }
@@ -348,12 +322,6 @@ export const HomePage = () => {
         ) : null}
       </header>
 
-      {actionMessage ? (
-        <p className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm text-foreground">
-          {actionMessage}
-        </p>
-      ) : null}
-
       {homeFeed.isError ? (
         <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-200">
           Could not refresh home feed right now.
@@ -367,7 +335,7 @@ export const HomePage = () => {
               key={item.id}
               item={item}
               onPlay={(entry) => playMedia(entry, visibleItems)}
-              onAdd={addToFavorites}
+              onAdd={openPlaylistSheet}
               isLoading={loadingItemId === item.id}
               isCurrentTrack={current?.id === item.id}
               isCurrentPlaying={current?.id === item.id && playing}
@@ -387,6 +355,12 @@ export const HomePage = () => {
           ))}
         </div>
       )}
+
+      <AddToPlaylistSheet
+        open={playlistSheetOpen}
+        item={playlistTargetItem}
+        onClose={() => setPlaylistSheetOpen(false)}
+      />
     </section>
   );
 };

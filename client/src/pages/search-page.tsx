@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { mediaApi, playlistApi } from "@/services/api";
+import { toast } from "sonner";
+import { mediaApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
 import { usePreferencesStore } from "@/store/preferences-store";
 import { SearchBox } from "@/components/media/search-box";
 import { MediaCard } from "@/components/media/media-card";
+import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet";
 import { Card } from "@/components/ui/card";
 import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
@@ -25,8 +27,9 @@ export const SearchPage = () => {
 
   const [query, setQuery] = useState("");
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [realtimeProgressText, setRealtimeProgressText] = useState<string | null>(null);
+  const [playlistSheetOpen, setPlaylistSheetOpen] = useState(false);
+  const [playlistTargetItem, setPlaylistTargetItem] = useState<MediaItem | null>(null);
   const progressClearTimerRef = useRef<number | null>(null);
 
   const playAudio = usePlayerStore((state) => state.playAudio);
@@ -111,43 +114,14 @@ export const SearchPage = () => {
   }, [search]);
   const loaderRef = useInfiniteTrigger(loadMore);
 
-  const ensureFavoritesPlaylist = useCallback(async () => {
-    const playlists = await playlistApi.list();
-    let playlist = playlists.find((entry) => entry.name.toLowerCase() === "favorites");
-    if (!playlist) {
-      await playlistApi.create("Favorites", "Auto-generated favorites playlist");
-      const refreshed = await playlistApi.list();
-      playlist = refreshed.find((entry) => entry.name.toLowerCase() === "favorites");
-    }
-    return playlist ?? null;
+  const openPlaylistSheet = useCallback((item: MediaItem) => {
+    setPlaylistTargetItem(item);
+    setPlaylistSheetOpen(true);
   }, []);
-
-  const addToFavorites = useCallback(
-    async (item: MediaItem) => {
-      setStatusMessage(null);
-      try {
-        const favorites = await ensureFavoritesPlaylist();
-        if (!favorites) return;
-        await playlistApi.addItem(favorites._id, {
-          mediaId: item.id,
-          mediaType: item.type,
-          title: item.title,
-          creator: item.creator,
-          artwork: item.thumbnail,
-          duration: item.duration,
-        });
-        setStatusMessage(`${item.type === "music" ? "Song" : "Video"} added to Favorites`);
-      } catch {
-        setStatusMessage("Sign in to save favorites");
-      }
-    },
-    [ensureFavoritesPlaylist]
-  );
 
   const playMedia = useCallback(
     async (item: MediaItem, queue: MediaItem[]) => {
       setLoadingItemId(item.id);
-      setStatusMessage(null);
 
       try {
         if (item.type === "music") {
@@ -174,7 +148,7 @@ export const SearchPage = () => {
           })
           .catch(() => undefined);
       } catch {
-        setStatusMessage("Playback failed. Please try another item.");
+        toast.error("Playback failed. Please try another item.");
       } finally {
         setLoadingItemId(null);
       }
@@ -211,12 +185,6 @@ export const SearchPage = () => {
         </p>
       ) : null}
 
-      {statusMessage ? (
-        <p className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm text-foreground">
-          {statusMessage}
-        </p>
-      ) : null}
-
       {showEmptyState ? (
         <Card>
           <p className="text-sm text-muted-foreground">
@@ -233,7 +201,7 @@ export const SearchPage = () => {
                 key={item.id}
                 item={item}
                 onPlay={(entry) => playMedia(entry, items)}
-                onAdd={addToFavorites}
+                onAdd={openPlaylistSheet}
                 isLoading={loadingItemId === item.id}
                 isCurrentTrack={current?.id === item.id}
                 isCurrentPlaying={current?.id === item.id && playing}
@@ -251,6 +219,12 @@ export const SearchPage = () => {
           ))}
         </div>
       ) : null}
+
+      <AddToPlaylistSheet
+        open={playlistSheetOpen}
+        item={playlistTargetItem}
+        onClose={() => setPlaylistSheetOpen(false)}
+      />
     </section>
   );
 };
