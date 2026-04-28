@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { authApi } from "@/services/api";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 const otpSchema = z.object({
@@ -50,7 +49,8 @@ export const ForgotPasswordOtpPage = () => {
       navigate(
         `/forgot-password/reset?email=${encodeURIComponent(email)}&returnTo=${encodeURIComponent(
           returnTo
-        )}`
+        )}`,
+        { replace: true }
       );
     } catch (error: any) {
       toast.error(error?.response?.data?.message ?? "Code verification failed.");
@@ -112,7 +112,7 @@ export const ForgotPasswordOtpPage = () => {
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4">
       <section className="w-full max-w-md">
-        <Card className="rounded-none border-0 bg-white p-6 text-neutral-900 shadow-none backdrop-blur-0 sm:p-8">
+        <div className="text-neutral-900">
           <header className="space-y-1 text-center">
             <h1 className="text-3xl font-bold tracking-tight">Verify Code</h1>
             <p className="text-sm text-neutral-600">
@@ -178,11 +178,11 @@ export const ForgotPasswordOtpPage = () => {
           </form>
 
           <p className="mt-5 text-center text-sm text-neutral-600">
-            <Link to={`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
+            <Link replace to={`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
               Change email
             </Link>
           </p>
-        </Card>
+        </div>
       </section>
     </div>
   );

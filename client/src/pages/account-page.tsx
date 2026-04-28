@@ -1,5 +1,6 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useGoogleLogin } from "@react-oauth/google";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,6 +8,7 @@ import { authApi } from "@/services/api";
 import { useAuthStore } from "@/store/auth-store";
 
 export const AccountPage = () => {
+  const navigate = useNavigate();
   const { user, setSession, logout } = useAuthStore();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -63,6 +65,11 @@ export const AccountPage = () => {
     setStatus("Signed in successfully");
   };
 
+  const onLogout = () => {
+    logout();
+    navigate("/sign-in", { replace: true });
+  };
+
   return (
     <section className="mx-auto max-w-lg space-y-4">
       <h1 className="text-3xl font-bold uppercase tracking-[0.18em]">Account</h1>
@@ -71,7 +78,7 @@ export const AccountPage = () => {
         <Card className="space-y-3">
           <p className="text-lg font-semibold">{user.name}</p>
           <p className="text-sm text-muted-foreground">{user.email}</p>
-          <Button onClick={logout}>Log out</Button>
+          <Button onClick={onLogout}>Log out</Button>
         </Card>
       ) : (
         <>

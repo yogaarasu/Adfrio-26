@@ -26,7 +26,7 @@ export const TopNav = ({ onMenuToggle }: TopNavProps) => {
           >
             <Menu className="h-5 w-5" />
           </Button>
-          <NavLink to="/home" className="text-lg font-bold tracking-widest text-foreground">
+          <NavLink replace to="/home" className="text-lg font-bold tracking-widest text-foreground">
             ADFRIO
           </NavLink>
         </div>

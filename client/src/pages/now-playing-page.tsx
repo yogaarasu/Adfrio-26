@@ -10,7 +10,7 @@ import {
   SkipBack,
   SkipForward,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet";
@@ -24,6 +24,7 @@ const SLEEP_OPTIONS = [5, 10, 30, 45, 60];
 
 export const NowPlayingPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const current = usePlayerStore((state) => state.current);
   const audio = usePlayerStore((state) => state.audio);
   const queue = usePlayerStore((state) => state.queue);
@@ -67,13 +68,12 @@ export const NowPlayingPage = () => {
   const closePage = useCallback(() => {
     setIsClosing(true);
     window.setTimeout(() => {
-      if (window.history.length > 1) {
-        navigate(-1);
-      } else {
-        navigate("/home");
-      }
+      const params = new URLSearchParams(location.search);
+      const from = params.get("from");
+      const target = from && from.startsWith("/") ? from : "/home";
+      navigate(target, { replace: true });
     }, 260);
-  }, [navigate]);
+  }, [location.search, navigate]);
 
   useEffect(() => {
     const raf = window.requestAnimationFrame(() => {

@@ -195,8 +195,9 @@ export const GlobalAudioPlayer = () => {
 
   const openSongSheet = useCallback(() => {
     if (current?.type !== "music") return;
-    navigate("/now-playing");
-  }, [current?.type, navigate]);
+    const from = `${location.pathname}${location.search}`;
+    navigate(`/now-playing?from=${encodeURIComponent(from)}`, { replace: true });
+  }, [current?.type, location.pathname, location.search, navigate]);
 
   const readCurrentTime = useCallback((): number => {
     const player = playerRef.current;
@@ -468,7 +469,7 @@ export const GlobalAudioPlayer = () => {
 
       {!video.active && !hideMiniBar ? (
         <div
-          className="adfrio-global-audio-player fixed bottom-16 left-0 right-0 z-50 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
+          className="adfrio-global-audio-player fixed bottom-16 left-0 right-0 z-50 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur md:bottom-0 lg:left-[18rem]"
           role="region"
           aria-label="Audio player"
         >

@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
 import { API_URL } from "@/lib/constants";
@@ -8,7 +16,6 @@ import { authApi } from "@/services/api";
 import { useAuthStore } from "@/store/auth-store";
 import { usePlayerStore } from "@/store/player-store";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 type Mode = "sign-in" | "sign-up" | "sign-up-verify";
@@ -126,7 +133,7 @@ export const AuthPageForm = ({ mode }: Props) => {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
-  const fallbackBackTarget = "/home";
+  const authSwitchInFlightRef = useRef(false);
 
   useEffect(() => {
     if (isVerify) {
@@ -222,7 +229,8 @@ export const AuthPageForm = ({ mode }: Props) => {
       navigate(
         `/sign-up/verify?email=${encodeURIComponent(
           parsed.data.email.trim().toLowerCase()
-        )}&returnTo=${encodeURIComponent(returnTo)}`
+        )}&returnTo=${encodeURIComponent(returnTo)}`,
+        { replace: true }
       );
     } catch (error: any) {
       toast.error(error?.response?.data?.message ?? "Unable to send verification code.");
@@ -234,7 +242,7 @@ export const AuthPageForm = ({ mode }: Props) => {
   const verifySignupOtp = async () => {
     if (!verifyEmail) {
       toast.error("Missing email. Please create account again.");
-      navigate(`/sign-up?returnTo=${encodeURIComponent(returnTo)}`);
+      navigate(`/sign-up?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
       return;
     }
 
@@ -337,6 +345,29 @@ export const AuthPageForm = ({ mode }: Props) => {
     }
   };
 
+  const handleAuthModeSwitch = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+
+    if (authSwitchInFlightRef.current) {
+      return;
+    }
+
+    const targetPath = isSignUp ? "/sign-in" : "/sign-up";
+    const targetUrl = `${targetPath}?returnTo=${encodeURIComponent(returnTo)}`;
+    const currentUrl = `${location.pathname}${location.search}`;
+
+    if (currentUrl === targetUrl) {
+      return;
+    }
+
+    authSwitchInFlightRef.current = true;
+    navigate(targetUrl, { replace: true });
+  };
+
+  useEffect(() => {
+    authSwitchInFlightRef.current = false;
+  }, [location.pathname, location.search]);
+
   if (user) {
     return <Navigate to={returnTo} replace />;
   }
@@ -344,25 +375,7 @@ export const AuthPageForm = ({ mode }: Props) => {
   if (isVerify) {
     return (
       <section className="mx-auto w-full max-w-md">
-        <Card className="rounded-none border-0 bg-white p-6 text-neutral-900 shadow-none backdrop-blur-0 sm:p-8">
-          <div className="mb-4 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                if (window.history.length > 1) {
-                  navigate(-1);
-                  return;
-                }
-                navigate(fallbackBackTarget, { replace: true });
-              }}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-neutral-300 bg-white/70 text-neutral-800 transition hover:bg-white"
-              aria-label="Back"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </button>
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-neutral-700">adfrio</p>
-          </div>
-
+        <div className="text-neutral-900">
           <header className="space-y-1 text-center">
             <h1 className="text-3xl font-bold tracking-tight">Verify your email</h1>
             <p className="text-sm text-neutral-600">
@@ -428,18 +441,18 @@ export const AuthPageForm = ({ mode }: Props) => {
 
           <p className="mt-4 text-center text-sm text-neutral-600">
             Wrong email?{" "}
-            <Link to={`/sign-up?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
+            <Link replace to={`/sign-up?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
               Go back
             </Link>
           </p>
-        </Card>
+        </div>
       </section>
     );
   }
 
   return (
     <section className="mx-auto w-full max-w-md">
-      <Card className="rounded-none border-0 bg-white p-6 text-neutral-900 shadow-none backdrop-blur-0 sm:p-8">
+      <div className="text-neutral-900">
         <header className="space-y-1 text-center">
           <h1 className="text-3xl font-bold tracking-tight">
             {isSignUp ? "Register" : "Welcome back"}
@@ -447,7 +460,9 @@ export const AuthPageForm = ({ mode }: Props) => {
           <p className="text-sm text-neutral-600">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
             <Link
+              replace
               to={`${isSignUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`}
+              onClick={handleAuthModeSwitch}
               className="font-medium underline"
             >
               {isSignUp ? "Login" : "Register"}
@@ -521,7 +536,10 @@ export const AuthPageForm = ({ mode }: Props) => {
                   type="button"
                   className="text-xs text-neutral-600 hover:text-neutral-900"
                   onClick={() =>
-                    navigate(`/forgot-password?returnTo=${encodeURIComponent(location.pathname + location.search)}`)
+                    navigate(
+                      `/forgot-password?returnTo=${encodeURIComponent(location.pathname + location.search)}`,
+                      { replace: true }
+                    )
                   }
                 >
                   Forgot password?
@@ -611,7 +629,7 @@ export const AuthPageForm = ({ mode }: Props) => {
         <p className="mt-5 text-center text-xs text-neutral-500">
           By continuing, you agree to our Terms of Service and Privacy Policy.
         </p>
-      </Card>
+      </div>
     </section>
   );
 };

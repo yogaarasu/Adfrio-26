@@ -76,7 +76,3 @@ body[data-playlist-sheet-open="true"] .adfrio-mobile-bottom-nav,
 body[data-playlist-sheet-open="true"] .adfrio-global-audio-player {
   display: none !important;
 }
-
-body[data-sidebar-open="true"] .adfrio-global-audio-player {
-  display: none !important;
-}

@@ -147,7 +147,7 @@ export const LibraryPage = () => {
 
   const openPlaylist = useCallback(
     (id: string) => {
-      navigate(`/library/${id}`);
+      navigate(`/library/${id}`, { replace: true });
     },
     [navigate]
   );
@@ -403,7 +403,7 @@ export const LibraryPage = () => {
       ) : (
         <section className="space-y-4">
           <header className="space-y-3">
-            <Button variant="ghost" size="sm" onClick={() => navigate("/library")} className="w-fit">
+            <Button variant="ghost" size="sm" onClick={() => navigate("/library", { replace: true })} className="w-fit">
               <ChevronLeft className="mr-1 h-4 w-4" />
               Back
             </Button>

@@ -46,7 +46,7 @@ export const AuthRequiredDialog = () => {
             className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800"
             onClick={() => {
               hide();
-              navigate(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`);
+              navigate(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
             }}
           >
             Sign In
@@ -57,7 +57,7 @@ export const AuthRequiredDialog = () => {
             className="rounded-xl border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50"
             onClick={() => {
               hide();
-              navigate(`/sign-up?returnTo=${encodeURIComponent(returnTo)}`);
+              navigate(`/sign-up?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
             }}
           >
             Sign Up

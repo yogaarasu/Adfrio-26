@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -39,6 +39,7 @@ const colorFromName = (name: string): string => {
 type ConfirmAction = "logout" | "delete-account" | null;
 
 export const ProfilePage = () => {
+  const navigate = useNavigate();
   const { user, setSession, logout } = useAuthStore();
   const language = usePreferencesStore((state) => state.language);
   const setLanguage = usePreferencesStore((state) => state.setLanguage);
@@ -99,6 +100,7 @@ export const ProfilePage = () => {
     logout();
     toast.success("Logged out successfully.");
     setConfirmAction(null);
+    navigate("/sign-in", { replace: true });
   };
 
   const confirmDeleteAccount = async () => {
@@ -108,6 +110,7 @@ export const ProfilePage = () => {
       logout();
       toast.success("Account deleted.");
       setConfirmAction(null);
+      navigate("/sign-in", { replace: true });
     } catch (error) {
       toast.error(getErrorMessage(error, "Could not delete account."));
     } finally {
@@ -210,10 +213,10 @@ export const ProfilePage = () => {
                 Sign in to sync playlists, save your profile, and continue playback across devices.
               </p>
               <div className="flex flex-wrap gap-2">
-                <Link to="/sign-in">
+                <Link replace to="/sign-in">
                   <Button size="sm">Sign In</Button>
                 </Link>
-                <Link to="/sign-up">
+                <Link replace to="/sign-up">
                   <Button size="sm" variant="outline">
                     Register
                   </Button>

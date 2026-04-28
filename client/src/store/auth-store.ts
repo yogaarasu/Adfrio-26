@@ -27,6 +27,15 @@ export const useAuthStore = create<AuthState>()(
       logout: () => {
         localStorage.removeItem("adfrio_token");
         localStorage.removeItem("adfrio-player");
+        localStorage.removeItem("adfrio-auth");
+        if (typeof window !== "undefined") {
+          const sessionKeys = Object.keys(sessionStorage);
+          sessionKeys.forEach((key) => {
+            if (key.startsWith("adfrio_")) {
+              sessionStorage.removeItem(key);
+            }
+          });
+        }
         set({ token: null, user: null });
       }
     }),

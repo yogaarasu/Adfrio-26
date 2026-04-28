@@ -43,7 +43,7 @@ api.interceptors.response.use(
     if (shouldForceLogout) {
       useAuthStore.getState().logout();
       if (typeof window !== "undefined" && !window.location.pathname.startsWith("/sign-in")) {
-        window.location.assign("/sign-in");
+        window.location.replace("/sign-in");
       }
     }
 

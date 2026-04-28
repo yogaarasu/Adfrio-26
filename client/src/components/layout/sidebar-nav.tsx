@@ -1,5 +1,6 @@
+import { type MouseEvent } from "react";
 import { Home, Library, Search, User, X } from "lucide-react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/store/auth-store";
@@ -27,6 +28,7 @@ const avatarColorFromName = (name: string): string => {
 
 export const SidebarNav = ({ mobileOpen, onClose }: SidebarNavProps) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const avatarBg = avatarColorFromName(user?.name ?? "");
@@ -35,8 +37,15 @@ export const SidebarNav = ({ mobileOpen, onClose }: SidebarNavProps) => {
   const handleLogout = () => {
     logout();
     onClose();
-    navigate("/sign-in");
+    navigate("/sign-in", { replace: true });
   };
+
+  const preventDuplicateNavigation =
+    (path: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+      if (location.pathname === path) {
+        event.preventDefault();
+      }
+    };
 
   return (
     <>
@@ -48,6 +57,8 @@ export const SidebarNav = ({ mobileOpen, onClose }: SidebarNavProps) => {
               <NavLink
                 key={item.path}
                 to={item.path}
+                replace
+                onClick={preventDuplicateNavigation(item.path)}
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
@@ -121,7 +132,11 @@ export const SidebarNav = ({ mobileOpen, onClose }: SidebarNavProps) => {
               <NavLink
                 key={item.path}
                 to={item.path}
-                onClick={onClose}
+                replace
+                onClick={(event) => {
+                  preventDuplicateNavigation(item.path)(event);
+                  onClose();
+                }}
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",

@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { authApi } from "@/services/api";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 const requestSchema = z.object({
@@ -40,7 +39,8 @@ export const ForgotPasswordPage = () => {
       navigate(
         `/forgot-password/otp?email=${encodeURIComponent(
           parsed.data.email.trim().toLowerCase()
-        )}&returnTo=${encodeURIComponent(returnTo)}`
+        )}&returnTo=${encodeURIComponent(returnTo)}`,
+        { replace: true }
       );
     } catch (error: any) {
       toast.error(error?.response?.data?.message ?? "Could not send OTP.");
@@ -52,7 +52,7 @@ export const ForgotPasswordPage = () => {
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4">
       <section className="w-full max-w-md">
-        <Card className="rounded-none border-0 bg-white p-6 text-neutral-900 shadow-none backdrop-blur-0 sm:p-8">
+        <div className="text-neutral-900">
           <header className="space-y-1 text-center">
             <h1 className="text-3xl font-bold tracking-tight">Forgot Password</h1>
             <p className="text-sm text-neutral-600">Enter your account email to continue.</p>
@@ -101,11 +101,11 @@ export const ForgotPasswordPage = () => {
           </form>
 
           <p className="mt-5 text-center text-sm text-neutral-600">
-            <Link to={`/sign-in?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
+            <Link replace to={`/sign-in?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
               Back to Sign In
             </Link>
           </p>
-        </Card>
+        </div>
       </section>
     </div>
   );

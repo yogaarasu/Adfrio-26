@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { mediaApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
@@ -22,9 +23,15 @@ type SearchResponse = {
 };
 
 export const SearchPage = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const mode = usePreferencesStore((state) => state.mode);
   const language = usePreferencesStore((state) => state.language);
-  const [query, setQuery] = useState("");
+  const queryFromUrl = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("q") ?? "";
+  }, [location.search]);
+  const [query, setQuery] = useState(queryFromUrl);
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
   const [realtimeProgressText, setRealtimeProgressText] = useState<string | null>(null);
   const [playlistSheetOpen, setPlaylistSheetOpen] = useState(false);
@@ -37,7 +44,28 @@ export const SearchPage = () => {
   const current = usePlayerStore((state) => state.current);
   const playing = usePlayerStore((state) => state.playing);
   const { connectionId, lastMessage } = useRealtimeConnection();
-  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    setQuery(queryFromUrl);
+  }, [queryFromUrl]);
+
+  const setSearchQuery = useCallback(
+    (nextQuery: string) => {
+      setQuery(nextQuery);
+      const params = new URLSearchParams(location.search);
+      if (nextQuery.trim().length > 0) {
+        params.set("q", nextQuery);
+      } else {
+        params.delete("q");
+      }
+      const nextSearch = params.toString();
+      const target = `${location.pathname}${nextSearch ? `?${nextSearch}` : ""}`;
+      const current = `${location.pathname}${location.search}`;
+      if (target === current) return;
+      navigate(target, { replace: true });
+    },
+    [location.pathname, location.search, navigate]
+  );
 
   const search = useInfiniteQuery({
     queryKey: ["search-mode", mode, language, query],
@@ -53,6 +81,8 @@ export const SearchPage = () => {
     getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined,
     placeholderData: (previous) => previous,
     staleTime: 20 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 
   const items = useMemo(() => {
@@ -100,9 +130,8 @@ export const SearchPage = () => {
       if (progressClearTimerRef.current !== null) {
         window.clearTimeout(progressClearTimerRef.current);
       }
-      queryClient.removeQueries({ queryKey: ["search-mode", mode, language] });
     },
-    [language, mode, queryClient]
+    []
   );
 
   useEffect(() => {
@@ -171,7 +200,11 @@ export const SearchPage = () => {
         <p className="text-sm text-muted-foreground">Type what you want and we will find the best match.</p>
       </header>
 
-      <SearchBox value={query} onChange={setQuery} placeholder={mode === "music" ? "Search songs..." : "Search videos..."} />
+      <SearchBox
+        value={query}
+        onChange={setSearchQuery}
+        placeholder={mode === "music" ? "Search songs..." : "Search videos..."}
+      />
 
       {realtimeProgressText && query.trim().length > 0 ? (
         <p className="text-xs text-cyan-700 dark:text-cyan-200/90">{realtimeProgressText}</p>
