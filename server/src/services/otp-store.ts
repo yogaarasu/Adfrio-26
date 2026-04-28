@@ -1,7 +1,8 @@
 import { Redis } from "@upstash/redis";
 import { env } from "../config/env.js";
+import { randomUUID } from "node:crypto";
 
-export type OtpPurpose = "signup" | "login";
+export type OtpPurpose = "signup" | "login" | "password-reset";
 
 export type OtpSessionRecord = {
   code: string;
@@ -12,6 +13,7 @@ export const OTP_TTL_SECONDS = 10 * 60;
 export const OTP_COOLDOWN_SECONDS = 60;
 export const OTP_DAILY_LIMIT = 10;
 export const OTP_MAX_ATTEMPTS = 5;
+export const PASSWORD_RESET_GRANT_TTL_SECONDS = 10 * 60;
 
 const redis = new Redis({
   url: env.UPSTASH_REDIS_REST_URL,
@@ -30,6 +32,8 @@ const dailyBucket = (): string => new Date().toISOString().slice(0, 10);
 
 const dailyLimitKey = (purpose: OtpPurpose, email: string): string =>
   `otp:daily:${dailyBucket()}:${purpose}:${normalizeEmail(email)}`;
+
+const passwordResetGrantKey = (token: string): string => `password-reset:grant:${token}`;
 
 const secondsUntilTomorrowUtc = (): number => {
   const now = new Date();
@@ -114,4 +118,23 @@ export const markOtpDispatch = async (purpose: OtpPurpose, email: string): Promi
   if (current === 1) {
     await redis.expire(dailyKey, secondsUntilTomorrowUtc());
   }
+};
+
+export const createPasswordResetGrant = async (email: string): Promise<string> => {
+  const token = randomUUID();
+  await redis.set(passwordResetGrantKey(token), normalizeEmail(email), {
+    ex: PASSWORD_RESET_GRANT_TTL_SECONDS,
+  });
+  return token;
+};
+
+export const getPasswordResetGrantEmail = async (token: string): Promise<string | null> => {
+  if (!token) return null;
+  const email = await redis.get<string | null>(passwordResetGrantKey(token));
+  return email ? normalizeEmail(email) : null;
+};
+
+export const deletePasswordResetGrant = async (token: string): Promise<void> => {
+  if (!token) return;
+  await redis.del(passwordResetGrantKey(token));
 };

@@ -1,6 +1,7 @@
 import axios, { AxiosError } from "axios";
 import { API_URL } from "@/lib/constants";
 import type { MediaItem, MediaType, PlaylistItem, PlaylistSummary, StreamResponse } from "@/types/media";
+import { useAuthStore } from "@/store/auth-store";
 
 const api = axios.create({
   baseURL: API_URL,
@@ -21,6 +22,34 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError<{ message?: string }>) => {
+    const status = error.response?.status;
+    const message = error.response?.data?.message ?? "";
+    const requestUrl = error.config?.url ?? "";
+    const hasToken = Boolean(localStorage.getItem("adfrio_token"));
+    const isAuthEndpoint =
+      requestUrl.includes("/auth/signin") ||
+      requestUrl.includes("/auth/signup") ||
+      requestUrl.includes("/auth/password/forgot") ||
+      requestUrl.includes("/auth/otp");
+    const shouldForceLogout =
+      hasToken &&
+      !isAuthEndpoint &&
+      (status === 401 || (status === 404 && /user not found/i.test(message)));
+
+    if (shouldForceLogout) {
+      useAuthStore.getState().logout();
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/sign-in")) {
+        window.location.assign("/sign-in");
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -97,6 +126,19 @@ export const authApi = {
     api.post("/auth/signup/request", { name, email, password }),
   signupVerify: (email: string, otp: string) => api.post("/auth/signup/verify", { email, otp }),
   signIn: (email: string, password: string) => api.post("/auth/signin", { email, password }),
+  requestForgotPasswordOtp: (email: string) =>
+    api.post("/auth/password/forgot/request", { email }),
+  verifyForgotPasswordOtp: (email: string, otp: string) =>
+    api.post<{ message: string; resetToken: string }>("/auth/password/forgot/verify", {
+      email,
+      otp,
+    }),
+  resetForgotPassword: (resetToken: string, newPassword: string, confirmPassword: string) =>
+    api.post("/auth/password/forgot/reset", {
+      resetToken,
+      newPassword,
+      confirmPassword,
+    }),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.patch("/auth/password", { currentPassword, newPassword }),
   googleAuth: (credential: string) => api.post("/auth/google", { credential }),
@@ -126,6 +168,7 @@ export const mediaApi = {
     pageToken?: string;
     sessionSeed?: number;
     realtimeId?: string;
+    interestSeeds?: string[];
   }): Promise<{ items: MediaItem[]; nextPageToken: string | null }> => {
     const { data } = await api.get("/media/home", {
       params: {
@@ -134,6 +177,7 @@ export const mediaApi = {
         pageToken: params.pageToken,
         sessionSeed: params.sessionSeed,
         realtimeId: params.realtimeId,
+        interestSeeds: params.interestSeeds?.join("|"),
       },
     });
     return data;
@@ -191,9 +235,18 @@ export const playlistApi = {
     const { data } = await api.get("/playlists");
     return data.playlists as PlaylistSummary[];
   },
-  create: (name: string, description: string, playlistType: MediaType) =>
-    api.post("/playlists", { name, description, playlistType }),
+  create: (
+    name: string,
+    description: string,
+    playlistType: MediaType,
+    initialItem?: PlaylistItem
+  ) =>
+    api.post("/playlists", { name, description, playlistType, initialItem }),
+  update: (playlistId: string, payload: { name?: string; description?: string }) =>
+    api.patch(`/playlists/${playlistId}`, payload),
   addItem: (playlistId: string, item: PlaylistItem) => api.post(`/playlists/${playlistId}/items`, item),
+  reorderItems: (playlistId: string, mediaIds: string[]) =>
+    api.patch(`/playlists/${playlistId}/items/reorder`, { mediaIds }),
   removeItem: (playlistId: string, mediaId: string) => api.delete(`/playlists/${playlistId}/items/${mediaId}`),
   delete: (playlistId: string) => api.delete(`/playlists/${playlistId}`),
 };

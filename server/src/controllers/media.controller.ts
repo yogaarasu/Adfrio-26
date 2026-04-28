@@ -26,6 +26,7 @@ const homeFeedSchema = z.object({
   pageToken: z.string().optional(),
   sessionSeed: z.string().optional(),
   realtimeId: z.string().optional(),
+  interestSeeds: z.string().optional(),
 });
 
 const proxyByIdSchema = z.object({
@@ -59,7 +60,6 @@ const HOME_VIDEO_TEMPLATES = [
   "must watch {language} top videos",
 ];
 
-const MAX_HOME_PAGES = 240;
 const MAX_SEARCH_PAGES = 160;
 const HOME_FALLBACK_MIN_ITEMS = 12;
 
@@ -189,6 +189,25 @@ const normalizeLanguage = (value: string | undefined): string => {
   if (!value) return "global";
   const clean = value.trim().replace(/[^a-zA-Z ]+/g, "").replace(/\s+/g, " ");
   return clean.length > 0 ? clean : "global";
+};
+
+const parseInterestSeeds = (value: string | undefined): string[] => {
+  if (!value) return [];
+  return value
+    .split("|")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length >= 2)
+    .slice(0, 8);
+};
+
+const withInterest = (
+  baseQuery: string,
+  mode: "music" | "video",
+  interest: string | undefined
+): string => {
+  if (!interest) return baseQuery;
+  const modeHint = mode === "music" ? "songs" : "videos";
+  return `${interest} ${modeHint} ${baseQuery}`.replace(/\s+/g, " ").trim();
 };
 
 const buildHomeQuery = (
@@ -403,6 +422,7 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<Response
   const pageIndex = parseIndexToken(parsed.data.pageToken);
   const seed = parseIndexToken(parsed.data.sessionSeed);
   const language = normalizeLanguage(parsed.data.language);
+  const interestSeeds = parseInterestSeeds(parsed.data.interestSeeds);
   const realtimeId = parsed.data.realtimeId;
 
   const publishProgress = (percent: number, message: string): void => {
@@ -416,12 +436,15 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<Response
     });
   };
 
-  if (pageIndex >= MAX_HOME_PAGES) {
-    return res.json({ items: [], nextPageToken: null });
-  }
-
   try {
-    const primaryQuery = buildHomeQuery(mode, language, pageIndex, seed);
+    const selectedInterest = interestSeeds.length
+      ? interestSeeds[(pageIndex + seed) % interestSeeds.length]
+      : undefined;
+    const primaryQuery = withInterest(
+      buildHomeQuery(mode, language, pageIndex, seed),
+      mode,
+      selectedInterest
+    );
     publishProgress(4, "Feed update started");
     publishProgress(16, `Finding ${mode === "music" ? "songs" : "videos"} for "${primaryQuery}"`);
 
@@ -431,14 +454,22 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<Response
     let combined = [...primary.items];
 
     if (combined.length < HOME_FALLBACK_MIN_ITEMS) {
-      const fallbackQuery = buildHomeQuery(mode, language, pageIndex + 3, seed + 5);
+      const fallbackInterest =
+        interestSeeds.length > 1
+          ? interestSeeds[(pageIndex + seed + 1) % interestSeeds.length]
+          : selectedInterest;
+      const fallbackQuery = withInterest(
+        buildHomeQuery(mode, language, pageIndex + 3, seed + 5),
+        mode,
+        fallbackInterest
+      );
       publishProgress(75, `Expanding feed with "${fallbackQuery}"`);
       const fallback = await searchYoutube(fallbackQuery, mode);
       combined = combined.concat(fallback.items);
     }
 
     const items = dedupeById(combined).slice(0, 20);
-    const nextPageToken = pageIndex + 1 < MAX_HOME_PAGES ? String(pageIndex + 1) : null;
+    const nextPageToken = String(pageIndex + 1);
 
     publishProgress(90, `Finalizing ${items.length} items`);
     publishProgress(100, `Ready: ${items.length} items`);

@@ -93,7 +93,7 @@ export const AccountPage = () => {
               <Button onClick={() => void requestOtp()}>Send OTP</Button>
             ) : (
               <div className="space-y-2">
-                <Input placeholder="6-digit OTP" value={otp} onChange={(event) => setOtp(event.target.value)} />
+                <Input placeholder="4-digit OTP" value={otp} onChange={(event) => setOtp(event.target.value)} />
                 <Button onClick={() => void verifyOtp()}>Verify OTP</Button>
               </div>
             )}

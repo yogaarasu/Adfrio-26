@@ -7,10 +7,13 @@ import {
   googleAuthCode,
   googleAuthStart,
   me,
+  resetForgotPassword,
   requestOtp,
+  requestForgotPasswordOtp,
   signInWithPassword,
   signupRequestOtp,
   signupVerifyOtp,
+  verifyForgotPasswordOtp,
   verifyOtp
 } from "../controllers/auth.controller.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -25,6 +28,9 @@ authRouter.get("/google/callback", asyncHandler(googleAuthCallback));
 authRouter.post("/signup/request", asyncHandler(signupRequestOtp));
 authRouter.post("/signup/verify", asyncHandler(signupVerifyOtp));
 authRouter.post("/signin", asyncHandler(signInWithPassword));
+authRouter.post("/password/forgot/request", asyncHandler(requestForgotPasswordOtp));
+authRouter.post("/password/forgot/verify", asyncHandler(verifyForgotPasswordOtp));
+authRouter.post("/password/forgot/reset", asyncHandler(resetForgotPassword));
 authRouter.post("/otp/request", asyncHandler(requestOtp));
 authRouter.post("/otp/verify", asyncHandler(verifyOtp));
 authRouter.get("/me", requireAuth, asyncHandler(me));

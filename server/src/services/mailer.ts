@@ -82,38 +82,46 @@ export const sendOtpEmail = async (
 
   const title = options?.title ?? "Email Verification Code";
   const subtitle = options?.subtitle ?? "Use this one-time code to continue securely.";
+  const year = new Date().getUTCFullYear();
+  const supportAddress = env.SMTP_USER ?? "security@adfrio.com";
 
   const html = `
-  <div style="margin:0;padding:24px;background:#f5f7fb;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0f172a;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;margin:0 auto;">
+  <div style="margin:0;padding:28px 16px;background:#f2f5fb;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0f172a;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;margin:0 auto;">
       <tr>
-        <td style="padding:0 0 14px 2px;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:#475569;font-weight:700;">
-          Adfrio Security
+        <td style="padding:0 0 12px 2px;font-size:12px;letter-spacing:0.16em;text-transform:uppercase;color:#475569;font-weight:700;">
+          Adfrio Security Notice
         </td>
       </tr>
       <tr>
-        <td style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
-          <div style="padding:24px 24px 10px 24px;">
-            <h1 style="margin:0;font-size:22px;line-height:1.35;color:#0f172a;">${title}</h1>
-            <p style="margin:8px 0 0 0;font-size:14px;line-height:1.6;color:#475569;">${subtitle}</p>
+        <td style="background:#ffffff;border:1px solid #dbe3f0;border-radius:18px;overflow:hidden;box-shadow:0 10px 24px rgba(15,23,42,0.05);">
+          <div style="padding:22px 24px 0 24px;">
+            <h1 style="margin:0;font-size:24px;line-height:1.35;color:#0f172a;">${title}</h1>
+            <p style="margin:10px 0 0 0;font-size:14px;line-height:1.65;color:#475569;">${subtitle}</p>
           </div>
-          <div style="padding:16px 24px 24px 24px;">
+          <div style="padding:18px 24px 24px 24px;">
             <p style="margin:0 0 14px 0;font-size:14px;line-height:1.6;color:#334155;">
-              Use the verification code below to continue your request.
+              Enter the verification code below in the Adfrio app to continue.
             </p>
-            <div style="margin:0 auto 14px auto;max-width:320px;padding:14px 18px;border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc;text-align:center;">
-              <span style="display:inline-block;font-size:34px;font-weight:800;letter-spacing:0.26em;color:#0f172a;">${code}</span>
+            <div style="margin:0 auto 14px auto;max-width:360px;padding:18px 20px;border:1px solid #c8d5ea;border-radius:14px;background:#f8fbff;text-align:center;">
+              <span style="display:inline-block;font-size:36px;font-weight:800;letter-spacing:0.24em;color:#0f172a;">${code}</span>
             </div>
-            <p style="margin:0 0 6px 0;font-size:13px;color:#475569;">
+            <p style="margin:0 0 8px 0;font-size:13px;color:#334155;">
               This code expires in <strong style="color:#0f172a;">10 minutes</strong>.
             </p>
-            <p style="margin:0;font-size:13px;color:#64748b;">
-              If you did not request this verification, you can safely ignore this email.
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
+              If you did not request this action, please ignore this email and review your account security.
             </p>
           </div>
-          <div style="padding:14px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;font-size:12px;color:#64748b;line-height:1.5;">
-            For your safety, never share this code with anyone, including support staff.
+          <div style="padding:14px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;font-size:12px;color:#64748b;line-height:1.6;">
+            <strong style="color:#0f172a;">Security tip:</strong> Adfrio support will never ask for this code.<br/>
+            Need help? Contact us at <a href="mailto:${supportAddress}" style="color:#0f172a;text-decoration:underline;">${supportAddress}</a>.
           </div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:12px 2px 0 2px;font-size:11px;color:#94a3b8;text-align:center;">
+          &copy; ${year} Adfrio. All rights reserved.
         </td>
       </tr>
     </table>
@@ -123,8 +131,8 @@ export const sendOtpEmail = async (
   await transporter.sendMail({
     from: resolveFromAddress(),
     to: email,
-    subject: `Adfrio Verification - ${title}`,
-    text: `Your OTP code is ${code}. It will expire in 10 minutes. If you did not request this, ignore this email.`,
+    subject: `Adfrio Security Code - ${title}`,
+    text: `Adfrio security code: ${code}. Expires in 10 minutes. Do not share this code. If you did not request this, ignore this email or contact ${supportAddress}.`,
     html
   });
 };

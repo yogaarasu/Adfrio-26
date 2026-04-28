@@ -10,7 +10,7 @@ const items = [
 ];
 
 export const BottomNav = () => (
-  <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/80 bg-background/95 p-2 backdrop-blur md:hidden">
+  <nav className="adfrio-mobile-bottom-nav fixed bottom-0 left-0 right-0 z-[70] border-t border-border/70 bg-background/80 p-2 shadow-[0_-8px_24px_rgba(0,0,0,0.08)] backdrop-blur-xl md:hidden">
     <ul className="grid grid-cols-4 gap-1">
       {items.map((item) => {
         const Icon = item.icon;
@@ -21,7 +21,7 @@ export const BottomNav = () => (
               className={({ isActive }) =>
                 cn(
                   "flex flex-col items-center gap-1 rounded-xl py-2 text-xs",
-                  isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+                  isActive ? "text-foreground" : "text-muted-foreground"
                 )
               }
             >

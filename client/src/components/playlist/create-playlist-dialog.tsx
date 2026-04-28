@@ -10,6 +10,7 @@ type Props = {
   creating?: boolean;
   title?: string;
   initialType?: MediaType;
+  scopeClassName?: string;
   onClose: () => void;
   onCreate: (name: string, playlistType: MediaType) => Promise<void> | void;
 };
@@ -19,6 +20,7 @@ export const CreatePlaylistDialog = ({
   creating = false,
   title = "Create Playlist",
   initialType = "music",
+  scopeClassName,
   onClose,
   onCreate,
 }: Props) => {
@@ -43,7 +45,8 @@ export const CreatePlaylistDialog = ({
   return (
     <div
       className={cn(
-        "fixed inset-0 z-[86] transition-opacity duration-200",
+        "fixed inset-0 z-[150] transition-opacity duration-200",
+        scopeClassName,
         open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
       )}
       aria-hidden={!open}

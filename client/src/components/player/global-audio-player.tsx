@@ -468,7 +468,7 @@ export const GlobalAudioPlayer = () => {
 
       {!video.active && !hideMiniBar ? (
         <div
-          className="fixed bottom-16 left-0 right-0 z-50 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
+          className="adfrio-global-audio-player fixed bottom-16 left-0 right-0 z-50 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur md:bottom-0"
           role="region"
           aria-label="Audio player"
         >

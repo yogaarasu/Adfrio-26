@@ -12,6 +12,7 @@ import {
   type AppTheme,
   usePreferencesStore,
 } from "@/store/preferences-store";
+import { usePlayerStore } from "@/store/player-store";
 import { cn } from "@/lib/utils";
 
 const THEME_LABELS: Record<AppTheme, string> = {
@@ -26,6 +27,15 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return message?.trim() || fallback;
 };
 
+const colorFromName = (name: string): string => {
+  const seed = name.trim().toLowerCase() || "user";
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 360;
+  }
+  return `hsl(${hash} 72% 45%)`;
+};
+
 type ConfirmAction = "logout" | "delete-account" | null;
 
 export const ProfilePage = () => {
@@ -34,6 +44,9 @@ export const ProfilePage = () => {
   const setLanguage = usePreferencesStore((state) => state.setLanguage);
   const theme = usePreferencesStore((state) => state.theme);
   const setTheme = usePreferencesStore((state) => state.setTheme);
+  const hasMiniPlayer = usePlayerStore(
+    (state) => Boolean(state.current) && !state.video.active
+  );
 
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
@@ -102,16 +115,17 @@ export const ProfilePage = () => {
     }
   };
 
-  const initials = (user?.name ?? "")
-    .split(" ")
-    .filter(Boolean)
-    .map((chunk) => chunk[0]?.toUpperCase() ?? "")
-    .join("")
-    .slice(0, 2);
+  const firstLetter = (user?.name?.trim().charAt(0) ?? "U").toUpperCase();
+  const avatarBg = colorFromName(user?.name ?? "");
 
   return (
     <>
-      <section className="mx-auto max-w-2xl space-y-4 text-foreground">
+      <section
+        className={cn(
+          "mx-auto max-w-2xl space-y-4 text-foreground",
+          hasMiniPlayer ? "pb-24 md:pb-12" : ""
+        )}
+      >
         <h1 className="text-3xl font-bold uppercase tracking-[0.16em]">Profile</h1>
 
         {user ? (
@@ -123,7 +137,12 @@ export const ProfilePage = () => {
                     {user.avatar ? (
                       <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
                     ) : (
-                      <span>{initials || "U"}</span>
+                      <span
+                        className="flex h-full w-full items-center justify-center text-lg font-semibold text-white"
+                        style={{ backgroundColor: avatarBg }}
+                      >
+                        {firstLetter}
+                      </span>
                     )}
                   </div>
                   <div className="min-w-0">

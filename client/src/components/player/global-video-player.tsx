@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { mediaApi } from "@/services/api";
 import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet";
+import { useBottomSheetVisibility } from "@/hooks/use-bottom-sheet-visibility";
 import { usePlayerStore } from "@/store/player-store";
 import { accentColorFromSeed } from "@/lib/accent-color";
 import { formatDuration } from "@/lib/utils";
@@ -73,6 +74,7 @@ export const GlobalVideoPlayer = () => {
   const [isVisible, setIsVisible] = useState(false);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [descriptionTop, setDescriptionTop] = useState<number | null>(null);
+  useBottomSheetVisibility(sleepSheetOpen || descriptionOpen);
 
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relatedHydrationAttemptsRef = useRef<Map<string, number>>(new Map());
@@ -586,6 +588,7 @@ export const GlobalVideoPlayer = () => {
       <AddToPlaylistSheet
         open={playlistSheetOpen}
         item={current}
+        constrainToPage={false}
         onClose={() => setPlaylistSheetOpen(false)}
       />
     </div>

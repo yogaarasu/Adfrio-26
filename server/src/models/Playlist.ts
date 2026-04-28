@@ -16,6 +16,7 @@ const playlistSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     name: { type: String, required: true, trim: true },
+    normalizedName: { type: String, required: true, trim: true, lowercase: true },
     description: { type: String, default: "" },
     playlistType: { type: String, enum: ["music", "video"], default: "music" },
     items: { type: [playlistItemSchema], default: [] }
@@ -23,13 +24,21 @@ const playlistSchema = new Schema(
   { timestamps: true }
 );
 
-playlistSchema.index({ userId: 1, name: 1 }, { unique: true });
+playlistSchema.pre("validate", function normalizePlaylistName(next) {
+  const currentName = typeof this.name === "string" ? this.name.trim() : "";
+  this.name = currentName;
+  this.normalizedName = currentName.toLowerCase();
+  next();
+});
 
-export const PlaylistModel = model("Playlist", playlistSchema);
+playlistSchema.index({ userId: 1, normalizedName: 1 }, { unique: true });
+
+export const PlaylistModel = model("Playlist", playlistSchema, "playlists");
 export type PlaylistDocument = {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
   name: string;
+  normalizedName: string;
   description: string;
   playlistType: "music" | "video";
   items: Array<{

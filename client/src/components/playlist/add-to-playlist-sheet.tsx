@@ -1,19 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { EllipsisVertical, Loader2, Plus, Trash2, X } from "lucide-react";
+import { EllipsisVertical, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { playlistApi } from "@/services/api";
 import { CreatePlaylistDialog } from "@/components/playlist/create-playlist-dialog";
+import { useBottomSheetVisibility } from "@/hooks/use-bottom-sheet-visibility";
 import type { MediaItem, PlaylistSummary } from "@/types/media";
 
 type Props = {
   open: boolean;
   item: MediaItem | null;
   onClose: () => void;
+  constrainToPage?: boolean;
 };
 
-export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
+export const AddToPlaylistSheet = ({
+  open,
+  item,
+  onClose,
+  constrainToPage = true,
+}: Props) => {
+  const currentType = item?.type ?? "music";
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [addingPlaylistId, setAddingPlaylistId] = useState<string | null>(null);
@@ -22,6 +31,17 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
   const [actionPlaylist, setActionPlaylist] = useState<PlaylistSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [renamingPlaylist, setRenamingPlaylist] = useState<PlaylistSummary | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
+
+  const playlistThumbnail = useCallback((playlist: PlaylistSummary): string => {
+    const artwork = playlist.items.find((entry) => entry.mediaType === currentType)?.artwork;
+    if (artwork) return artwork;
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(
+      playlist.name
+    )}&background=0f172a&color=ffffff&size=160&bold=true&format=png`;
+  }, [currentType]);
 
   const loadPlaylists = useCallback(async () => {
     setLoading(true);
@@ -45,8 +65,11 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
       setShowCreateDialog(false);
       setActionPlaylist(null);
       setConfirmDelete(false);
+      setRenamingPlaylist(null);
     }
   }, [open]);
+
+  useBottomSheetVisibility(open || Boolean(actionPlaylist));
 
   const addToPlaylist = useCallback(
     async (playlistId: string) => {
@@ -63,8 +86,11 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
         });
         toast.success(`${item.type === "music" ? "Song" : "Video"} added to playlist.`);
         onClose();
-      } catch {
-        toast.error(`Could not add ${item.type === "music" ? "song" : "video"} to playlist.`);
+      } catch (error: any) {
+        toast.error(
+          error?.response?.data?.message ??
+            `Could not add ${item.type === "music" ? "song" : "video"} to playlist.`
+        );
       } finally {
         setAddingPlaylistId(null);
       }
@@ -77,16 +103,33 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
     if (!trimmed) return;
     setCreating(true);
     try {
-      await playlistApi.create(trimmed, "Created from Adfrio", playlistType);
+      const initialItem =
+        item && item.type === playlistType
+          ? {
+              mediaId: item.id,
+              mediaType: item.type,
+              title: item.title,
+              artwork: item.thumbnail,
+              creator: item.creator,
+              duration: item.duration,
+            }
+          : undefined;
+
+      await playlistApi.create(trimmed, "Created from Adfrio", playlistType, initialItem);
       await loadPlaylists();
       setShowCreateDialog(false);
-      toast.success("Playlist created.");
-    } catch {
-      toast.error("Could not create playlist.");
+      toast.success(
+        initialItem
+          ? `${playlistType === "music" ? "Song" : "Video"} added to new playlist.`
+          : "Playlist created."
+      );
+      onClose();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message ?? "Could not create playlist.");
     } finally {
       setCreating(false);
     }
-  }, [loadPlaylists]);
+  }, [item, loadPlaylists, onClose]);
 
   const deletePlaylist = useCallback(async () => {
     if (!actionPlaylist) return;
@@ -98,14 +141,34 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
       setConfirmDelete(false);
       setActionPlaylist(null);
       toast.success("Playlist deleted.");
-    } catch {
-      toast.error("Could not delete playlist.");
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message ?? "Could not delete playlist.");
     } finally {
       setDeleting(false);
     }
   }, [actionPlaylist]);
 
-  const currentType = item?.type ?? "music";
+  const renamePlaylist = useCallback(async () => {
+    if (!renamingPlaylist) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      toast.error("Playlist name cannot be empty.");
+      return;
+    }
+    setRenaming(true);
+    try {
+      await playlistApi.update(renamingPlaylist._id, { name: trimmed });
+      await loadPlaylists();
+      setRenamingPlaylist(null);
+      setActionPlaylist(null);
+      toast.success("Playlist renamed.");
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message ?? "Could not rename playlist.");
+    } finally {
+      setRenaming(false);
+    }
+  }, [loadPlaylists, renameValue, renamingPlaylist]);
+
   const sortedPlaylists = useMemo(
     () =>
       [...playlists]
@@ -113,24 +176,30 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
         .sort((a, b) => a.name.localeCompare(b.name)),
     [currentType, playlists]
   );
+  const scopedDesktopClass = constrainToPage ? "lg:left-[18rem]" : "";
 
   return (
     <>
       <div
         className={cn(
-          "fixed inset-0 z-[72] transition-opacity duration-300",
+          "fixed inset-0 z-[140] transition-opacity duration-300",
+          scopedDesktopClass,
           open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
         )}
       >
         <button
           type="button"
           className="absolute inset-0 bg-black/60"
-          onClick={onClose}
+          onClick={() => {
+            if (showCreateDialog || creating) return;
+            onClose();
+          }}
           aria-label="Close add to playlist sheet"
         />
         <section
           className={cn(
-            "absolute bottom-0 left-0 right-0 max-h-[78vh] rounded-t-3xl border-t border-border bg-card px-4 pb-5 pt-4 transition-transform duration-300 ease-out",
+            "absolute bottom-0 left-0 right-0 min-h-[30vh] max-h-[78vh] rounded-t-3xl border-t border-border bg-card px-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-4 transition-transform duration-300 ease-out",
+            showCreateDialog ? "pointer-events-none" : "",
             open ? "translate-y-0" : "translate-y-full"
           )}
           aria-label="Add item to playlist"
@@ -142,7 +211,12 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setShowCreateDialog(true)}
+                onClick={() => {
+                  setActionPlaylist(null);
+                  setConfirmDelete(false);
+                  setRenamingPlaylist(null);
+                  setShowCreateDialog(true);
+                }}
                 aria-label="Create new playlist"
               >
                 <Plus className="mr-1 h-4 w-4" />
@@ -162,6 +236,11 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
                     key={playlist._id}
                     className="flex items-center gap-2 rounded-2xl border border-border bg-muted/40 px-3 py-2.5"
                   >
+                    <img
+                      src={playlistThumbnail(playlist)}
+                      alt={playlist.name}
+                      className="h-10 w-10 shrink-0 rounded-md object-cover"
+                    />
                     <button
                       type="button"
                       onClick={() => void addToPlaylist(playlist._id)}
@@ -202,13 +281,15 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
         open={showCreateDialog}
         creating={creating}
         initialType={currentType}
+        scopeClassName={scopedDesktopClass}
         onClose={() => setShowCreateDialog(false)}
         onCreate={createPlaylist}
       />
 
       <div
         className={cn(
-          "fixed inset-0 z-[74] transition-opacity duration-300",
+          "fixed inset-0 z-[142] transition-opacity duration-300",
+          scopedDesktopClass,
           actionPlaylist ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
         )}
       >
@@ -236,6 +317,18 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
             <button
               type="button"
               className="flex w-full items-center gap-3 rounded-2xl border border-border px-4 py-3 text-left text-sm transition hover:bg-muted"
+              onClick={() => {
+                if (!actionPlaylist) return;
+                setRenamingPlaylist(actionPlaylist);
+                setRenameValue(actionPlaylist.name);
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+              <span>Rename playlist</span>
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-3 rounded-2xl border border-border px-4 py-3 text-left text-sm transition hover:bg-muted"
               onClick={() => setConfirmDelete(true)}
             >
               <Trash2 className="h-4 w-4" />
@@ -247,7 +340,46 @@ export const AddToPlaylistSheet = ({ open, item, onClose }: Props) => {
 
       <div
         className={cn(
-          "fixed inset-0 z-[76] transition-opacity duration-200",
+          "fixed inset-0 z-[143] transition-opacity duration-200",
+          scopedDesktopClass,
+          renamingPlaylist ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        )}
+      >
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/55"
+          onClick={() => setRenamingPlaylist(null)}
+          aria-label="Close rename playlist"
+        />
+        <section
+          className={cn(
+            "absolute left-1/2 top-1/2 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-2xl border border-border bg-card p-5 transition-all duration-200",
+            renamingPlaylist ? "-translate-y-1/2 opacity-100" : "translate-y-6 opacity-0"
+          )}
+        >
+          <h3 className="text-base font-semibold">Rename Playlist</h3>
+          <Input
+            value={renameValue}
+            onChange={(event) => setRenameValue(event.target.value)}
+            className="mt-3"
+            placeholder="Playlist name"
+            maxLength={80}
+          />
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button variant="ghost" onClick={() => setRenamingPlaylist(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void renamePlaylist()} disabled={renaming}>
+              {renaming ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </section>
+      </div>
+
+      <div
+        className={cn(
+          "fixed inset-0 z-[144] transition-opacity duration-200",
+          scopedDesktopClass,
           confirmDelete ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
         )}
       >

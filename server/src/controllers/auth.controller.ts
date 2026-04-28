@@ -11,7 +11,10 @@ import { sendOtpEmail } from "../services/mailer.js";
 import {
   OTP_MAX_ATTEMPTS,
   checkOtpRequestPolicy,
+  createPasswordResetGrant,
+  deletePasswordResetGrant,
   deleteOtpSession,
+  getPasswordResetGrantEmail,
   getOtpSession,
   incrementOtpAttempts,
   markOtpDispatch,
@@ -29,7 +32,7 @@ const otpRequestSchema = z.object({
 
 const otpVerifySchema = z.object({
   email: z.string().email(),
-  otp: z.string().trim().regex(/^\d{6}$/)
+  otp: z.string().trim().regex(/^\d{4}$/)
 });
 
 const googleCredentialSchema = z.object({
@@ -63,7 +66,7 @@ const signupRequestSchema = z.object({
 
 const signupVerifySchema = z.object({
   email: z.string().email(),
-  otp: z.string().trim().regex(/^\d{6}$/),
+  otp: z.string().trim().regex(/^\d{4}$/),
 });
 
 const signinSchema = z.object({
@@ -89,6 +92,43 @@ const changePasswordSchema = z.object({
       "Password must include upper, lower, number and special character"
     ),
 });
+
+const forgotPasswordRequestSchema = z.object({
+  email: z.string().trim().email(),
+});
+
+const forgotPasswordVerifySchema = z.object({
+  email: z.string().trim().email(),
+  otp: z.string().trim().regex(/^\d{4}$/),
+});
+
+const generateOtpCode = (): string =>
+  Math.floor(Math.random() * 10000)
+    .toString()
+    .padStart(4, "0");
+
+const forgotPasswordResetSchema = z
+  .object({
+    resetToken: z.string().trim().min(1),
+    newPassword: z
+      .string()
+      .min(8)
+      .max(64)
+      .refine(
+        (value) => STRONG_PASSWORD_REGEX.test(value),
+        "Password must include upper, lower, number and special character"
+      ),
+    confirmPassword: z.string().min(8).max(64),
+  })
+  .superRefine((value, context) => {
+    if (value.newPassword !== value.confirmPassword) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["confirmPassword"],
+        message: "Password and confirm password do not match",
+      });
+    }
+  });
 
 type GoogleIdentity = {
   email: string;
@@ -194,7 +234,7 @@ export const requestOtp = async (req: Request, res: Response): Promise<Response>
     return sendError(res, 429, policy.message);
   }
 
-  const otp = `${Math.floor(100000 + Math.random() * 900000)}`;
+  const otp = generateOtpCode();
   let mailDeliveryFailed = false;
   await storeOtpSession("login", email, otp);
 
@@ -313,7 +353,7 @@ export const signupRequestOtp = async (req: Request, res: Response): Promise<Res
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  const otp = `${Math.floor(100000 + Math.random() * 900000)}`;
+  const otp = generateOtpCode();
   let mailDeliveryFailed = false;
   await storeOtpSession("signup", email, otp);
 
@@ -706,6 +746,123 @@ export const changePassword = async (req: Request, res: Response): Promise<Respo
   await user.save();
 
   return res.json({ message: "Password updated successfully" });
+};
+
+export const requestForgotPasswordOtp = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = forgotPasswordRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, "Invalid request payload");
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const policy = await checkOtpRequestPolicy("password-reset", email);
+  if (!policy.allowed) {
+    return sendError(res, 429, policy.message);
+  }
+
+  const user = await UserModel.findOne({ email }).lean();
+  if (!user) {
+    return sendError(res, 404, "No account found with this email.");
+  }
+  if (!user.passwordHash) {
+    return sendError(res, 400, "This account uses Google sign-in. Please use Google login.");
+  }
+
+  const otp = generateOtpCode();
+  let mailDeliveryFailed = false;
+  await storeOtpSession("password-reset", email, otp);
+
+  try {
+    await sendOtpEmail(email, otp, {
+      title: "Reset Your Password",
+      subtitle: "Use this one-time code to reset your Adfrio account password.",
+    });
+  } catch (error) {
+    console.error("[FORGOT PASSWORD OTP EMAIL ERROR]", error);
+    if (env.NODE_ENV === "production") {
+      await deleteOtpSession("password-reset", email);
+      return sendError(res, 502, resolveSmtpErrorMessage(error));
+    }
+    mailDeliveryFailed = true;
+    console.log(`[DEV OTP][PASSWORD-RESET] ${email}: ${otp}`);
+  }
+
+  await markOtpDispatch("password-reset", email);
+
+  return res.json(
+    mailDeliveryFailed
+      ? { message: "Password reset OTP generated for local development.", devOtp: otp }
+      : { message: "Password reset OTP sent" }
+  );
+};
+
+export const verifyForgotPasswordOtp = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = forgotPasswordVerifySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, parsed.error.issues[0]?.message ?? "Invalid request payload");
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const otpSession = await getOtpSession("password-reset", email);
+  if (!otpSession) {
+    return sendError(res, 400, "OTP expired or not found");
+  }
+
+  if (otpSession.attempts >= OTP_MAX_ATTEMPTS) {
+    await deleteOtpSession("password-reset", email);
+    return sendError(res, 429, "Too many attempts, request a new OTP");
+  }
+
+  const isValid = isOtpMatch(otpSession.code, parsed.data.otp);
+  if (!isValid) {
+    const attempts = await incrementOtpAttempts("password-reset", email);
+    if (attempts >= OTP_MAX_ATTEMPTS) {
+      await deleteOtpSession("password-reset", email);
+      return sendError(res, 429, "Too many attempts, request a new OTP");
+    }
+    return sendError(res, 400, "Incorrect OTP");
+  }
+
+  const user = await UserModel.findOne({ email }).lean();
+  if (!user || !user.passwordHash) {
+    await deleteOtpSession("password-reset", email);
+    return sendError(res, 400, "Password reset is available only for password accounts");
+  }
+
+  await deleteOtpSession("password-reset", email);
+  const resetToken = await createPasswordResetGrant(email);
+
+  return res.json({ message: "OTP verified successfully", resetToken });
+};
+
+export const resetForgotPassword = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = forgotPasswordResetSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, parsed.error.issues[0]?.message ?? "Invalid request payload");
+  }
+
+  const email = await getPasswordResetGrantEmail(parsed.data.resetToken);
+  if (!email) {
+    return sendError(res, 400, "Password reset session expired. Please verify OTP again.");
+  }
+
+  const user = await UserModel.findOne({ email });
+  if (!user || !user.passwordHash) {
+    await deletePasswordResetGrant(parsed.data.resetToken);
+    return sendError(res, 400, "Password reset is available only for password accounts");
+  }
+
+  const samePassword = await bcrypt.compare(parsed.data.newPassword, user.passwordHash);
+  if (samePassword) {
+    return sendError(res, 400, "New password must be different from current password");
+  }
+
+  user.passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
+  user.emailVerified = true;
+  await user.save();
+  await deletePasswordResetGrant(parsed.data.resetToken);
+
+  return res.json({ message: "Password reset successful" });
 };
 
 export const deleteAccount = async (req: Request, res: Response): Promise<Response> => {

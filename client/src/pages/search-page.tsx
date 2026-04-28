@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { mediaApi } from "@/services/api";
 import { usePlayerStore } from "@/store/player-store";
@@ -7,11 +7,11 @@ import { usePreferencesStore } from "@/store/preferences-store";
 import { SearchBox } from "@/components/media/search-box";
 import { MediaCard } from "@/components/media/media-card";
 import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet";
-import { Card } from "@/components/ui/card";
 import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
 import { buildLanguageQuery } from "@/lib/media-query";
 import { dedupeMediaItems, filterStrictSongs } from "@/lib/media-filters";
+import { trackRecommendationInterest } from "@/lib/recommendation-profile";
 import type { MediaItem } from "@/types/media";
 
 type SearchResponse = {
@@ -24,7 +24,6 @@ type SearchResponse = {
 export const SearchPage = () => {
   const mode = usePreferencesStore((state) => state.mode);
   const language = usePreferencesStore((state) => state.language);
-
   const [query, setQuery] = useState("");
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
   const [realtimeProgressText, setRealtimeProgressText] = useState<string | null>(null);
@@ -38,6 +37,7 @@ export const SearchPage = () => {
   const current = usePlayerStore((state) => state.current);
   const playing = usePlayerStore((state) => state.playing);
   const { connectionId, lastMessage } = useRealtimeConnection();
+  const queryClient = useQueryClient();
 
   const search = useInfiniteQuery({
     queryKey: ["search-mode", mode, language, query],
@@ -51,6 +51,8 @@ export const SearchPage = () => {
         connectionId ?? undefined
       ),
     getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined,
+    placeholderData: (previous) => previous,
+    staleTime: 20 * 1000,
   });
 
   const items = useMemo(() => {
@@ -98,8 +100,9 @@ export const SearchPage = () => {
       if (progressClearTimerRef.current !== null) {
         window.clearTimeout(progressClearTimerRef.current);
       }
+      queryClient.removeQueries({ queryKey: ["search-mode", mode, language] });
     },
-    []
+    [language, mode, queryClient]
   );
 
   useEffect(() => {
@@ -124,6 +127,7 @@ export const SearchPage = () => {
       setLoadingItemId(item.id);
 
       try {
+        trackRecommendationInterest(item);
         if (item.type === "music") {
           playAudio(
             item,
@@ -183,14 +187,6 @@ export const SearchPage = () => {
         <p className="text-xs text-muted-foreground">
           Interpreted as <span className="font-semibold text-foreground">{appliedQuery}</span>
         </p>
-      ) : null}
-
-      {showEmptyState ? (
-        <Card>
-          <p className="text-sm text-muted-foreground">
-            Start typing to search {mode === "music" ? "songs" : "videos"}.
-          </p>
-        </Card>
       ) : null}
 
       {!showEmptyState ? (

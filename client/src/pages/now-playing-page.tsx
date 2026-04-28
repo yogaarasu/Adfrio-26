@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet";
 import { accentColorFromSeed } from "@/lib/accent-color";
+import { useBottomSheetVisibility } from "@/hooks/use-bottom-sheet-visibility";
 import { cn, formatDuration } from "@/lib/utils";
 import { usePlayerStore } from "@/store/player-store";
 import type { MediaItem } from "@/types/media";
@@ -43,6 +44,7 @@ export const NowPlayingPage = () => {
   const [sleepSheetOpen, setSleepSheetOpen] = useState(false);
   const [playlistSheetOpen, setPlaylistSheetOpen] = useState(false);
   const [playlistTargetItem, setPlaylistTargetItem] = useState<MediaItem | null>(null);
+  useBottomSheetVisibility(sleepSheetOpen);
 
   const rafRef = useRef<number | null>(null);
   const lastSyncTimeRef = useRef(0);

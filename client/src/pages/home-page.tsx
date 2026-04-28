@@ -10,7 +10,9 @@ import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet"
 import { Button } from "@/components/ui/button";
 import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
+import { getDiscoveryFilters, matchesDiscoveryFilter, resolveFilterQuery } from "@/lib/discovery-filters";
 import { filterSafeVideos, filterStrictSongs, dedupeMediaItems } from "@/lib/media-filters";
+import { getRecommendationSeeds, trackRecommendationInterest } from "@/lib/recommendation-profile";
 import type { MediaItem } from "@/types/media";
 
 type SearchResponse = {
@@ -43,6 +45,21 @@ export const HomePage = () => {
   const [refreshExcludeIds, setRefreshExcludeIds] = useState<string[]>([]);
   const [playlistSheetOpen, setPlaylistSheetOpen] = useState(false);
   const [playlistTargetItem, setPlaylistTargetItem] = useState<MediaItem | null>(null);
+  const [selectedFilterId, setSelectedFilterId] = useState<string | null>(null);
+  const activeFilterId = useMemo(
+    () => (selectedFilterId && selectedFilterId !== "all" ? selectedFilterId : null),
+    [selectedFilterId]
+  );
+  const initialFeedData = useMemo(
+    () =>
+      cachedFeedItems.length > 0
+        ? {
+            pages: [{ items: cachedFeedItems, nextPageToken: "1" }],
+            pageParams: [""],
+          }
+        : undefined,
+    [cachedFeedItems]
+  );
   const historicalSeenSongIdsRef = useRef<Set<string>>(
     new Set(
       (() => {
@@ -138,8 +155,9 @@ export const HomePage = () => {
   );
 
   const homeFeed = useInfiniteQuery({
-    queryKey: ["home-feed", mode, language, refreshSeed],
-    enabled: cachedFeedItems.length === 0 || refreshSeed > 0,
+    queryKey: ["home-feed", mode, language, refreshSeed, activeFilterId],
+    enabled: true,
+    initialData: refreshSeed === 0 ? initialFeedData : undefined,
     initialPageParam: "",
     queryFn: ({ pageParam }) =>
       mediaApi.homeFeed({
@@ -148,9 +166,15 @@ export const HomePage = () => {
         pageToken: (pageParam as string) || undefined,
         sessionSeed: refreshSeed > 0 ? refreshSeed : undefined,
         realtimeId: connectionId ?? undefined,
+        interestSeeds: getRecommendationSeeds(mode, language, cachedFeedItems).concat(
+          resolveFilterQuery(mode, activeFilterId)
+            ? [resolveFilterQuery(mode, activeFilterId)]
+            : []
+        ),
       }),
     getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined,
-    staleTime: Infinity,
+    placeholderData: (previous) => previous,
+    staleTime: 30 * 1000,
     gcTime: 10 * 60 * 1000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -158,6 +182,10 @@ export const HomePage = () => {
     refetchOnReconnect: false,
   });
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = homeFeed;
+
+  useEffect(() => {
+    setSelectedFilterId(null);
+  }, [mode]);
 
   const feedItems = useMemo(() => {
     const merged = dedupeMediaItems((homeFeed.data?.pages ?? []).flatMap((page) => page.items));
@@ -178,7 +206,7 @@ export const HomePage = () => {
 
   useEffect(() => {
     if (homeFeed.isLoading) return;
-    if (feedItems.length >= 18) return;
+    if (feedItems.length >= 36) return;
     if (!hasNextPage || isFetchingNextPage) return;
     void fetchNextPage();
   }, [feedItems.length, fetchNextPage, hasNextPage, homeFeed.isLoading, isFetchingNextPage]);
@@ -190,7 +218,14 @@ export const HomePage = () => {
     setCachedFeedItems(compact);
   }, [cacheKey, feedItems]);
 
-  const visibleItems = feedItems.length > 0 ? feedItems : cachedFeedItems;
+  const visibleItems = useMemo(
+    () =>
+      (feedItems.length > 0 ? feedItems : cachedFeedItems).filter((item) =>
+        matchesDiscoveryFilter(`${item.title} ${item.creator}`, mode, activeFilterId)
+      ),
+    [activeFilterId, cachedFeedItems, feedItems, mode]
+  );
+  const filters = useMemo(() => getDiscoveryFilters(mode), [mode]);
 
   const onRefreshHome = useCallback(() => {
     const currentIds = visibleItems.map((item) => item.id);
@@ -247,7 +282,7 @@ export const HomePage = () => {
       if (!hasNextPage || isFetchingNextPage || homeFeed.isLoading) return;
       const viewportBottom = window.scrollY + window.innerHeight;
       const pageBottom = document.documentElement.scrollHeight;
-      if (pageBottom - viewportBottom <= 900) {
+      if (pageBottom - viewportBottom <= 1400) {
         void fetchNextPage();
       }
     };
@@ -271,6 +306,7 @@ export const HomePage = () => {
       setLoadingItemId(item.id);
 
       try {
+        trackRecommendationInterest(item);
         if (item.type === "music") {
           playAudio(
             item,
@@ -317,6 +353,22 @@ export const HomePage = () => {
             <RefreshCw className={`h-4 w-4 ${homeFeed.isFetching ? "animate-spin" : ""}`} />
           </Button>
         </div>
+        <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
+          {filters.map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              onClick={() => setSelectedFilterId(filter.id === "all" ? null : filter.id)}
+              className={`shrink-0 rounded-[5px] border px-3 py-1.5 text-xs font-medium ${
+                (activeFilterId ?? "all") === filter.id
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-muted-foreground"
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
         {realtimeProgressText ? (
           <p className="text-xs text-cyan-700 dark:text-cyan-200/90">{realtimeProgressText}</p>
         ) : null}
@@ -345,7 +397,7 @@ export const HomePage = () => {
         {mode === "music" && visibleItems.length === 0 ? (
           <p className="text-sm text-muted-foreground">No pure songs found right now.</p>
         ) : null}
-        <div ref={loaderRef} className="h-3" />
+        <div ref={loaderRef} className="h-12" />
       </section>
 
       {(homeFeed.isLoading || homeFeed.isFetchingNextPage) && visibleItems.length === 0 && (
@@ -359,6 +411,7 @@ export const HomePage = () => {
       <AddToPlaylistSheet
         open={playlistSheetOpen}
         item={playlistTargetItem}
+        constrainToPage={false}
         onClose={() => setPlaylistSheetOpen(false)}
       />
     </section>

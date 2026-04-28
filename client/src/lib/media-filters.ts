@@ -24,7 +24,16 @@ const BLOCKED_SONG_KEYWORDS = [
   "episode",
   "full movie",
   "movie scene",
-  "shorts"
+  "shorts",
+  "cartoon",
+  "cartoons",
+  "kids",
+  "nursery",
+  "rhymes",
+  "chhota bheem",
+  "doraemon",
+  "shinchan",
+  "animation"
 ];
 
 const BLOCKED_VIDEO_PATTERNS: RegExp[] = [

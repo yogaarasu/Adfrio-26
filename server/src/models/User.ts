@@ -15,4 +15,4 @@ const userSchema = new Schema(
 );
 
 export type User = InferSchemaType<typeof userSchema> & { _id: string };
-export const UserModel = model("User", userSchema);
+export const UserModel = model("User", userSchema, "users");
