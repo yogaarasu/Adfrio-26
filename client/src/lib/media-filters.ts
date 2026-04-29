@@ -58,10 +58,15 @@ const BLOCKED_VIDEO_PATTERNS: RegExp[] = [
 ];
 
 export const dedupeMediaItems = (items: MediaItem[]): MediaItem[] => {
-  const seen = new Set<string>();
+  const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
   return items.filter((item) => {
-    if (seen.has(item.id)) return false;
-    seen.add(item.id);
+    const creator = item.creator.toLowerCase().replace(/\s+/g, " ").trim();
+    const title = item.title.toLowerCase().replace(/\s+/g, " ").trim();
+    const fingerprint = `${item.type}|${title}|${creator}`;
+    if (seenIds.has(item.id) || seenFingerprints.has(fingerprint)) return false;
+    seenIds.add(item.id);
+    seenFingerprints.add(fingerprint);
     return true;
   });
 };

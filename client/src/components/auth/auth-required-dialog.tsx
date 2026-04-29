@@ -25,12 +25,12 @@ export const AuthRequiredDialog = () => {
         aria-label="Close sign in prompt"
         onClick={hide}
       />
-      <Card className="relative w-full max-w-md space-y-5 border-0 bg-white p-6 text-neutral-900 shadow-none">
+      <Card className="relative w-full max-w-md space-y-5 rounded-3xl border border-border/85 bg-card p-6 text-foreground shadow-panel">
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="absolute right-2 top-2 rounded-lg text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900"
+          className="absolute right-2 top-2 rounded-lg text-muted-foreground hover:bg-muted/70 hover:text-foreground"
           onClick={hide}
           aria-label="Close"
         >
@@ -38,12 +38,12 @@ export const AuthRequiredDialog = () => {
         </Button>
         <div>
           <h3 className="text-xl font-semibold">{title}</h3>
-          <p className="mt-1 text-sm text-neutral-600">{message}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{message}</p>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <Button
             type="button"
-            className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800"
+            className="rounded-xl"
             onClick={() => {
               hide();
               navigate(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });
@@ -54,7 +54,7 @@ export const AuthRequiredDialog = () => {
           <Button
             type="button"
             variant="outline"
-            className="rounded-xl border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50"
+            className="rounded-xl border-border/90 bg-card/80 text-foreground hover:bg-muted/70"
             onClick={() => {
               hide();
               navigate(`/sign-up?returnTo=${encodeURIComponent(returnTo)}`, { replace: true });

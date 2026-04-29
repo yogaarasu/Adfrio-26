@@ -17,7 +17,7 @@ export default {
         "primary-foreground": "hsl(var(--primary-foreground))"
       },
       boxShadow: {
-        panel: "0 0 0 1px hsl(var(--border)), 0 12px 28px rgba(0, 0, 0, 0.4)"
+        panel: "0 0 0 1px hsl(var(--border)), 0 14px 36px rgba(2, 6, 23, 0.18)"
       }
     }
   },

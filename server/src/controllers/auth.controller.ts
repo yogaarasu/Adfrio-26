@@ -68,6 +68,9 @@ const signupVerifySchema = z.object({
   email: z.string().email(),
   otp: z.string().trim().regex(/^\d{4}$/),
 });
+const signupResendSchema = z.object({
+  email: z.string().trim().email(),
+});
 
 const signinSchema = z.object({
   email: z.string().email(),
@@ -433,6 +436,57 @@ export const signupVerifyOtp = async (req: Request, res: Response): Promise<Resp
 
   const token = signJwt({ userId: String(user._id), email: user.email, name: user.name });
   return res.json({ token, user: sanitizeUser(user) });
+};
+
+export const signupResendOtp = async (req: Request, res: Response): Promise<Response> => {
+  const parsed = signupResendSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return sendError(res, 400, "Invalid request payload");
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const policy = await checkOtpRequestPolicy("signup", email);
+  if (!policy.allowed) {
+    return sendError(res, 429, policy.message);
+  }
+
+  const user = await UserModel.findOne({ email });
+  if (!user) {
+    return sendError(res, 404, "Sign-up session expired. Please create account again.");
+  }
+  if (!user.passwordHash || user.authProvider !== "local") {
+    return sendError(res, 400, "Password setup missing. Please sign up again.");
+  }
+  if (user.emailVerified) {
+    return sendError(res, 409, "Account already verified. Please sign in.");
+  }
+
+  const otp = generateOtpCode();
+  let mailDeliveryFailed = false;
+  await storeOtpSession("signup", email, otp);
+
+  try {
+    await sendOtpEmail(email, otp, {
+      title: "Verify Your Sign-Up",
+      subtitle: "Confirm your Adfrio account with this one-time verification code.",
+    });
+  } catch (error) {
+    console.error("[SIGNUP OTP RESEND EMAIL ERROR]", error);
+    if (env.NODE_ENV === "production") {
+      await deleteOtpSession("signup", email);
+      return sendError(res, 502, resolveSmtpErrorMessage(error));
+    }
+    mailDeliveryFailed = true;
+    console.log(`[DEV OTP][SIGNUP-RESEND] ${email}: ${otp}`);
+  }
+
+  await markOtpDispatch("signup", email);
+
+  return res.json(
+    mailDeliveryFailed
+      ? { message: "Verification OTP regenerated for local development.", devOtp: otp }
+      : { message: "Verification OTP resent" }
+  );
 };
 
 export const signInWithPassword = async (req: Request, res: Response): Promise<Response> => {

@@ -111,37 +111,56 @@ const normalizeFilterText = (value: string): string =>
 const tokenize = (value: string): Set<string> =>
   new Set(normalizeFilterText(value).split(" ").filter(Boolean));
 
+const compileLookupKeywords = (selected: DiscoveryFilterOption): string[] =>
+  [selected.label, ...selected.keywords]
+    .map(normalizeFilterText)
+    .filter(Boolean);
+
+export const createDiscoveryMatcher = (
+  mode: MediaType,
+  filterId: string | null
+): ((text: string) => boolean) => {
+  if (!filterId || filterId === "all") {
+    return () => true;
+  }
+
+  const source = getDiscoveryFilters(mode);
+  const selected = source.find((entry) => entry.id === filterId);
+  if (!selected) {
+    return () => true;
+  }
+
+  const lookup = compileLookupKeywords(selected);
+
+  return (text: string) => {
+    const normalized = normalizeFilterText(text);
+    const tokens = tokenize(text);
+
+    if (mode === "video" && filterId === "movies") {
+      const hasMovieIntent =
+        tokens.has("movie") ||
+        tokens.has("movies") ||
+        tokens.has("film") ||
+        tokens.has("cinema");
+      const hasSceneIntent =
+        tokens.has("scene") ||
+        tokens.has("scenes") ||
+        tokens.has("clip") ||
+        tokens.has("clips") ||
+        tokens.has("moment");
+      return hasMovieIntent || (hasSceneIntent && (tokens.has("movie") || tokens.has("film")));
+    }
+
+    return lookup.some((keyword) =>
+      keyword.includes(" ") ? normalized.includes(keyword) : tokens.has(keyword)
+    );
+  };
+};
+
 export const matchesDiscoveryFilter = (
   text: string,
   mode: MediaType,
   filterId: string | null
 ): boolean => {
-  if (!filterId || filterId === "all") return true;
-  const source = getDiscoveryFilters(mode);
-  const selected = source.find((entry) => entry.id === filterId);
-  if (!selected) return true;
-  const normalized = normalizeFilterText(text);
-  const tokens = tokenize(text);
-  if (mode === "video" && filterId === "movies") {
-    const hasMovieIntent =
-      tokens.has("movie") ||
-      tokens.has("movies") ||
-      tokens.has("film") ||
-      tokens.has("cinema");
-    const hasSceneIntent =
-      tokens.has("scene") ||
-      tokens.has("scenes") ||
-      tokens.has("clip") ||
-      tokens.has("clips") ||
-      tokens.has("moment");
-    return hasMovieIntent || (hasSceneIntent && (tokens.has("movie") || tokens.has("film")));
-  }
-
-  const lookup = [selected.label, ...selected.keywords]
-    .map(normalizeFilterText)
-    .filter(Boolean);
-
-  return lookup.some((keyword) =>
-    keyword.includes(" ") ? normalized.includes(keyword) : tokens.has(keyword)
-  );
+  return createDiscoveryMatcher(mode, filterId)(text);
 };

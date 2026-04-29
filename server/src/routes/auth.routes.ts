@@ -12,6 +12,7 @@ import {
   requestForgotPasswordOtp,
   signInWithPassword,
   signupRequestOtp,
+  signupResendOtp,
   signupVerifyOtp,
   verifyForgotPasswordOtp,
   verifyOtp
@@ -26,6 +27,7 @@ authRouter.post("/google/code", asyncHandler(googleAuthCode));
 authRouter.get("/google/start", asyncHandler(googleAuthStart));
 authRouter.get("/google/callback", asyncHandler(googleAuthCallback));
 authRouter.post("/signup/request", asyncHandler(signupRequestOtp));
+authRouter.post("/signup/resend", asyncHandler(signupResendOtp));
 authRouter.post("/signup/verify", asyncHandler(signupVerifyOtp));
 authRouter.post("/signin", asyncHandler(signInWithPassword));
 authRouter.post("/password/forgot/request", asyncHandler(requestForgotPasswordOtp));

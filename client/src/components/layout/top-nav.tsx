@@ -1,5 +1,5 @@
 import { Menu } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/store/preferences-store";
@@ -9,6 +9,7 @@ type TopNavProps = {
 };
 
 export const TopNav = ({ onMenuToggle }: TopNavProps) => {
+  const location = useLocation();
   const mode = usePreferencesStore((state) => state.mode);
   const setMode = usePreferencesStore((state) => state.setMode);
 
@@ -26,7 +27,15 @@ export const TopNav = ({ onMenuToggle }: TopNavProps) => {
           >
             <Menu className="h-5 w-5" />
           </Button>
-          <NavLink replace to="/home" className="text-lg font-bold tracking-widest text-foreground">
+          <NavLink
+            replace
+            to="/home"
+            className="text-lg font-bold tracking-widest text-foreground"
+            onClick={(event) => {
+              if (location.pathname !== "/home") return;
+              event.preventDefault();
+            }}
+          >
             ADFRIO
           </NavLink>
         </div>

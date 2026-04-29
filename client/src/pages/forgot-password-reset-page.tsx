@@ -35,6 +35,8 @@ const resolveReturnTo = (value: string | null): string =>
   value && value.startsWith("/") ? value : "/sign-in";
 
 const resetTokenStorageKey = (email: string): string => `adfrio_reset_token_${email}`;
+const emailSchema = z.string().trim().email();
+const isSafeResetToken = (value: string): boolean => /^[A-Za-z0-9_-]{24,300}$/.test(value);
 
 type FieldName = "newPassword" | "confirmPassword";
 type FieldErrors = Partial<Record<FieldName, string>>;
@@ -55,7 +57,11 @@ export const ForgotPasswordResetPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const email = useMemo(() => params.get("email")?.trim().toLowerCase() ?? "", [params]);
+  const email = useMemo(() => {
+    const raw = params.get("email")?.trim().toLowerCase() ?? "";
+    const parsed = emailSchema.safeParse(raw);
+    return parsed.success ? parsed.data : "";
+  }, [params]);
   const returnTo = useMemo(() => resolveReturnTo(params.get("returnTo")), [params]);
   const resetToken = useMemo(
     () => (email ? sessionStorage.getItem(resetTokenStorageKey(email)) ?? "" : ""),
@@ -70,7 +76,10 @@ export const ForgotPasswordResetPage = () => {
   if (!email) {
     return <Navigate to={`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`} replace />;
   }
-  if (!resetToken) {
+  if (!resetToken || !isSafeResetToken(resetToken)) {
+    if (email && resetToken && !isSafeResetToken(resetToken)) {
+      sessionStorage.removeItem(resetTokenStorageKey(email));
+    }
     return (
       <Navigate
         to={`/forgot-password/otp?email=${encodeURIComponent(email)}&returnTo=${encodeURIComponent(
@@ -112,12 +121,12 @@ export const ForgotPasswordResetPage = () => {
   };
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center px-4">
+    <div className="flex min-h-[70vh] items-center justify-center">
       <section className="w-full max-w-md">
-        <div className="text-neutral-900">
-          <header className="space-y-1 text-center">
-            <h1 className="text-3xl font-bold tracking-tight">Set New Password</h1>
-            <p className="text-sm text-neutral-600">Create and confirm your new password.</p>
+        <div>
+          <header className="space-y-2 text-center">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Set New Password</h1>
+            <p className="text-sm text-muted-foreground">Create and confirm your new password.</p>
           </header>
 
           <form
@@ -128,7 +137,7 @@ export const ForgotPasswordResetPage = () => {
             }}
           >
             <div className="space-y-1.5">
-              <label htmlFor="new-password" className="text-sm font-medium text-neutral-800">
+              <label htmlFor="new-password" className="text-sm font-medium text-foreground">
                 New Password
               </label>
               <Input
@@ -140,13 +149,13 @@ export const ForgotPasswordResetPage = () => {
                   clearFieldError("newPassword");
                 }}
                 autoComplete="new-password"
-                className="h-11 rounded-xl border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900"
+                className="h-11 rounded-xl border-border/90 bg-card text-foreground placeholder:text-muted-foreground focus:border-primary"
               />
               {errors.newPassword ? <p className="text-xs text-red-600">{errors.newPassword}</p> : null}
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="confirm-password" className="text-sm font-medium text-neutral-800">
+              <label htmlFor="confirm-password" className="text-sm font-medium text-foreground">
                 Confirm Password
               </label>
               <Input
@@ -158,7 +167,7 @@ export const ForgotPasswordResetPage = () => {
                   clearFieldError("confirmPassword");
                 }}
                 autoComplete="new-password"
-                className="h-11 rounded-xl border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900"
+                className="h-11 rounded-xl border-border/90 bg-card text-foreground placeholder:text-muted-foreground focus:border-primary"
               />
               {errors.confirmPassword ? (
                 <p className="text-xs text-red-600">{errors.confirmPassword}</p>
@@ -168,7 +177,7 @@ export const ForgotPasswordResetPage = () => {
             <Button
               type="submit"
               disabled={loading}
-              className="h-11 w-full rounded-xl bg-neutral-900 text-white hover:bg-neutral-800"
+              className="h-11 w-full rounded-xl"
             >
               {loading ? (
                 <span className="inline-flex items-center gap-2">
@@ -181,13 +190,13 @@ export const ForgotPasswordResetPage = () => {
             </Button>
           </form>
 
-          <p className="mt-5 text-center text-sm text-neutral-600">
+          <p className="mt-5 text-center text-sm text-muted-foreground">
             <Link
               replace
               to={`/forgot-password/otp?email=${encodeURIComponent(email)}&returnTo=${encodeURIComponent(
                 returnTo
               )}`}
-              className="underline"
+              className="font-semibold text-foreground underline underline-offset-4"
             >
               Back to code
             </Link>

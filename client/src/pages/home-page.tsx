@@ -10,7 +10,7 @@ import { AddToPlaylistSheet } from "@/components/playlist/add-to-playlist-sheet"
 import { Button } from "@/components/ui/button";
 import { useInfiniteTrigger } from "@/hooks/use-infinite-trigger";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
-import { getDiscoveryFilters, matchesDiscoveryFilter, resolveFilterQuery } from "@/lib/discovery-filters";
+import { createDiscoveryMatcher, getDiscoveryFilters } from "@/lib/discovery-filters";
 import { filterSafeVideos, filterStrictSongs, dedupeMediaItems } from "@/lib/media-filters";
 import { getRecommendationSeeds, trackRecommendationInterest } from "@/lib/recommendation-profile";
 import type { MediaItem } from "@/types/media";
@@ -37,6 +37,14 @@ export const HomePage = () => {
   const mode = usePreferencesStore((state) => state.mode);
   const language = usePreferencesStore((state) => state.language);
   const cacheKey = `adfrio_home_cache_${mode}_${language}`;
+  const filters = useMemo(() => getDiscoveryFilters(mode), [mode]);
+  const filterStorageKey = `adfrio_home_filter_${mode}`;
+  const readStoredFilter = useCallback((): string | null => {
+    if (typeof window === "undefined") return null;
+    const stored = sessionStorage.getItem(filterStorageKey);
+    if (!stored || stored === "all") return null;
+    return filters.some((entry) => entry.id === stored) ? stored : null;
+  }, [filterStorageKey, filters]);
 
   const [refreshSeed, setRefreshSeed] = useState(0);
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
@@ -45,7 +53,7 @@ export const HomePage = () => {
   const [refreshExcludeIds, setRefreshExcludeIds] = useState<string[]>([]);
   const [playlistSheetOpen, setPlaylistSheetOpen] = useState(false);
   const [playlistTargetItem, setPlaylistTargetItem] = useState<MediaItem | null>(null);
-  const [selectedFilterId, setSelectedFilterId] = useState<string | null>(null);
+  const [selectedFilterId, setSelectedFilterId] = useState<string | null>(() => readStoredFilter());
   const activeFilterId = useMemo(
     () => (selectedFilterId && selectedFilterId !== "all" ? selectedFilterId : null),
     [selectedFilterId]
@@ -155,7 +163,7 @@ export const HomePage = () => {
   );
 
   const homeFeed = useInfiniteQuery({
-    queryKey: ["home-feed", mode, language, refreshSeed, activeFilterId],
+    queryKey: ["home-feed", mode, language, refreshSeed],
     enabled: true,
     initialData: refreshSeed === 0 ? initialFeedData : undefined,
     initialPageParam: "",
@@ -166,11 +174,7 @@ export const HomePage = () => {
         pageToken: (pageParam as string) || undefined,
         sessionSeed: refreshSeed > 0 ? refreshSeed : undefined,
         realtimeId: connectionId ?? undefined,
-        interestSeeds: getRecommendationSeeds(mode, language, cachedFeedItems).concat(
-          resolveFilterQuery(mode, activeFilterId)
-            ? [resolveFilterQuery(mode, activeFilterId)]
-            : []
-        ),
+        interestSeeds: getRecommendationSeeds(mode, language, cachedFeedItems),
       }),
     getNextPageParam: (lastPage: SearchResponse) => lastPage.nextPageToken ?? undefined,
     placeholderData: (previous) => previous,
@@ -184,8 +188,8 @@ export const HomePage = () => {
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = homeFeed;
 
   useEffect(() => {
-    setSelectedFilterId(null);
-  }, [mode]);
+    setSelectedFilterId(readStoredFilter());
+  }, [readStoredFilter]);
 
   const feedItems = useMemo(() => {
     const merged = dedupeMediaItems((homeFeed.data?.pages ?? []).flatMap((page) => page.items));
@@ -218,14 +222,43 @@ export const HomePage = () => {
     setCachedFeedItems(compact);
   }, [cacheKey, feedItems]);
 
-  const visibleItems = useMemo(
-    () =>
-      (feedItems.length > 0 ? feedItems : cachedFeedItems).filter((item) =>
-        matchesDiscoveryFilter(`${item.title} ${item.creator}`, mode, activeFilterId)
-      ),
-    [activeFilterId, cachedFeedItems, feedItems, mode]
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!activeFilterId) {
+      sessionStorage.removeItem(filterStorageKey);
+      return;
+    }
+    sessionStorage.setItem(filterStorageKey, activeFilterId);
+  }, [activeFilterId, filterStorageKey]);
+
+  const filterMatcher = useMemo(
+    () => createDiscoveryMatcher(mode, activeFilterId),
+    [activeFilterId, mode]
   );
-  const filters = useMemo(() => getDiscoveryFilters(mode), [mode]);
+
+  const sourceItems = useMemo(
+    () => (feedItems.length > 0 ? feedItems : cachedFeedItems),
+    [cachedFeedItems, feedItems]
+  );
+
+  const visibleItems = useMemo(
+    () => sourceItems.filter((item) => filterMatcher(`${item.title} ${item.creator}`)),
+    [filterMatcher, sourceItems]
+  );
+
+  useEffect(() => {
+    if (!activeFilterId) return;
+    if (visibleItems.length >= 18) return;
+    if (!hasNextPage || isFetchingNextPage || homeFeed.isLoading) return;
+    void fetchNextPage();
+  }, [
+    activeFilterId,
+    fetchNextPage,
+    hasNextPage,
+    homeFeed.isLoading,
+    isFetchingNextPage,
+    visibleItems.length,
+  ]);
 
   const onRefreshHome = useCallback(() => {
     const currentIds = visibleItems.map((item) => item.id);
@@ -353,21 +386,25 @@ export const HomePage = () => {
             <RefreshCw className={`h-4 w-4 ${homeFeed.isFetching ? "animate-spin" : ""}`} />
           </Button>
         </div>
-        <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
-          {filters.map((filter) => (
-            <button
-              key={filter.id}
-              type="button"
-              onClick={() => setSelectedFilterId(filter.id === "all" ? null : filter.id)}
-              className={`shrink-0 rounded-[5px] border px-3 py-1.5 text-xs font-medium ${
-                (activeFilterId ?? "all") === filter.id
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card text-muted-foreground"
-              }`}
-            >
-              {filter.label}
-            </button>
-          ))}
+        <div className="relative -mx-4 px-4 sm:-mx-6 sm:px-6">
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-gradient-to-r from-background/65 to-transparent" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-background/65 to-transparent" />
+          <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
+            {filters.map((filter) => (
+              <button
+                key={filter.id}
+                type="button"
+                onClick={() => setSelectedFilterId(filter.id === "all" ? null : filter.id)}
+                className={`shrink-0 rounded-[8px] border px-3 py-1.5 text-xs font-medium ${
+                  (activeFilterId ?? "all") === filter.id
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-card/85 text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
         </div>
         {realtimeProgressText ? (
           <p className="text-xs text-cyan-700 dark:text-cyan-200/90">{realtimeProgressText}</p>

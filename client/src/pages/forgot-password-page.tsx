@@ -50,12 +50,12 @@ export const ForgotPasswordPage = () => {
   };
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center px-4">
+    <div className="flex min-h-[70vh] items-center justify-center">
       <section className="w-full max-w-md">
-        <div className="text-neutral-900">
-          <header className="space-y-1 text-center">
-            <h1 className="text-3xl font-bold tracking-tight">Forgot Password</h1>
-            <p className="text-sm text-neutral-600">Enter your account email to continue.</p>
+        <div>
+          <header className="space-y-2 text-center">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Forgot Password</h1>
+            <p className="text-sm text-muted-foreground">Enter your account email to continue.</p>
           </header>
 
           <form
@@ -66,7 +66,7 @@ export const ForgotPasswordPage = () => {
             }}
           >
             <div className="space-y-1.5">
-              <label htmlFor="email" className="text-sm font-medium text-neutral-800">
+              <label htmlFor="email" className="text-sm font-medium text-foreground">
                 Email
               </label>
               <Input
@@ -79,7 +79,7 @@ export const ForgotPasswordPage = () => {
                 }}
                 autoComplete="email"
                 type="email"
-                className="h-11 rounded-xl border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900"
+                className="h-11 rounded-xl border-border/90 bg-card text-foreground placeholder:text-muted-foreground focus:border-primary"
               />
               {emailError ? <p className="text-xs text-red-600">{emailError}</p> : null}
             </div>
@@ -87,7 +87,7 @@ export const ForgotPasswordPage = () => {
             <Button
               type="submit"
               disabled={loading}
-              className="h-11 w-full rounded-xl bg-neutral-900 text-white hover:bg-neutral-800"
+              className="h-11 w-full rounded-xl"
             >
               {loading ? (
                 <span className="inline-flex items-center gap-2">
@@ -100,8 +100,12 @@ export const ForgotPasswordPage = () => {
             </Button>
           </form>
 
-          <p className="mt-5 text-center text-sm text-neutral-600">
-            <Link replace to={`/sign-in?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
+          <p className="mt-5 text-center text-sm text-muted-foreground">
+            <Link
+              replace
+              to={`/sign-in?returnTo=${encodeURIComponent(returnTo)}`}
+              className="font-semibold text-foreground underline underline-offset-4"
+            >
               Back to Sign In
             </Link>
           </p>

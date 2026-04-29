@@ -124,6 +124,7 @@ export const authApi = {
   verifyOtp: (email: string, otp: string) => api.post("/auth/otp/verify", { email, otp }),
   signupRequest: (name: string, email: string, password: string) =>
     api.post("/auth/signup/request", { name, email, password }),
+  signupResend: (email: string) => api.post("/auth/signup/resend", { email }),
   signupVerify: (email: string, otp: string) => api.post("/auth/signup/verify", { email, otp }),
   signIn: (email: string, password: string) => api.post("/auth/signin", { email, password }),
   requestForgotPasswordOtp: (email: string) =>

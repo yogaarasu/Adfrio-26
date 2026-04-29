@@ -31,7 +31,7 @@ export const usePreferencesStore = create<PreferencesState>()(
     (set) => ({
       mode: "music",
       language: "Tamil",
-      theme: "system",
+      theme: "light",
       videoAutoplay: true,
       setMode: (mode) => set({ mode }),
       setLanguage: (language) => set({ language }),

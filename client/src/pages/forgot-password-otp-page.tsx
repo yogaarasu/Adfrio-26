@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 const otpSchema = z.object({
   otp: z.string().regex(/^\d{4}$/, "Enter the 4-digit code."),
 });
+const emailSchema = z.string().trim().email();
 
 const resolveReturnTo = (value: string | null): string =>
   value && value.startsWith("/") ? value : "/sign-in";
@@ -20,18 +21,35 @@ export const ForgotPasswordOtpPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const email = useMemo(() => params.get("email")?.trim().toLowerCase() ?? "", [params]);
+  const email = useMemo(() => {
+    const raw = params.get("email")?.trim().toLowerCase() ?? "";
+    const parsed = emailSchema.safeParse(raw);
+    return parsed.success ? parsed.data : "";
+  }, [params]);
   const returnTo = useMemo(() => resolveReturnTo(params.get("returnTo")), [params]);
 
   const [otpDigits, setOtpDigits] = useState<string[]>(Array(4).fill(""));
   const [otpError, setOtpError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(60);
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   if (!email) {
     return <Navigate to={`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`} replace />;
   }
+
+  useEffect(() => {
+    setResendCooldown(60);
+  }, [email]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendCooldown((value) => (value > 0 ? value - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldown]);
 
   const verifyOtp = async () => {
     const parsed = otpSchema.safeParse({ otp: otpDigits.join("") });
@@ -65,6 +83,7 @@ export const ForgotPasswordOtpPage = () => {
       await authApi.requestForgotPasswordOtp(email);
       setOtpDigits(Array(4).fill(""));
       setOtpError(null);
+      setResendCooldown(60);
       toast.success("New code sent to your email.");
       otpInputRefs.current[0]?.focus();
     } catch (error: any) {
@@ -110,13 +129,13 @@ export const ForgotPasswordOtpPage = () => {
   };
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center px-4">
+    <div className="flex min-h-[70vh] items-center justify-center">
       <section className="w-full max-w-md">
-        <div className="text-neutral-900">
-          <header className="space-y-1 text-center">
-            <h1 className="text-3xl font-bold tracking-tight">Verify Code</h1>
-            <p className="text-sm text-neutral-600">
-              Enter the 4-digit code sent to <span className="font-medium">{email}</span>.
+        <div>
+          <header className="space-y-2 text-center">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Verify Code</h1>
+            <p className="text-sm text-muted-foreground">
+              Enter the 4-digit code sent to <span className="font-semibold text-foreground">{email}</span>.
             </p>
           </header>
 
@@ -128,10 +147,7 @@ export const ForgotPasswordOtpPage = () => {
             }}
           >
             <div className="space-y-1.5">
-              <label htmlFor="otp" className="text-sm font-medium text-neutral-800">
-                Code
-              </label>
-              <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className="grid grid-cols-4 gap-2 sm:gap-3">
                 {otpDigits.map((digit, index) => (
                   <Input
                     key={`otp-forgot-${index}`}
@@ -145,17 +161,30 @@ export const ForgotPasswordOtpPage = () => {
                     onPaste={handleOtpPaste}
                     inputMode="numeric"
                     maxLength={1}
-                    className="h-10 w-10 rounded-xl border-neutral-300 bg-white/70 p-0 text-center text-lg font-semibold text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900 sm:h-12 sm:w-12"
+                    autoComplete="one-time-code"
+                    className="h-12 rounded-2xl border-border/90 bg-card p-0 text-center text-lg font-semibold tracking-[0.04em] text-foreground placeholder:text-muted-foreground focus:border-primary"
                   />
                 ))}
               </div>
               {otpError ? <p className="text-xs text-red-600">{otpError}</p> : null}
+              <button
+                type="button"
+                onClick={() => void resendOtp()}
+                disabled={loading || resendLoading || resendCooldown > 0}
+                className="w-full pt-1 text-center text-sm font-medium text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resendLoading
+                  ? "Resending OTP..."
+                  : resendCooldown > 0
+                    ? `Resend OTP in ${resendCooldown}s`
+                    : "Resend OTP"}
+              </button>
             </div>
 
             <Button
               type="submit"
               disabled={loading}
-              className="h-11 w-full rounded-xl bg-neutral-900 text-white hover:bg-neutral-800"
+              className="h-11 w-full rounded-xl"
             >
               {loading ? (
                 <span className="inline-flex items-center gap-2">
@@ -167,18 +196,14 @@ export const ForgotPasswordOtpPage = () => {
               )}
             </Button>
 
-            <button
-              type="button"
-              onClick={() => void resendOtp()}
-              disabled={loading || resendLoading}
-              className="w-full text-sm font-medium text-neutral-700 underline-offset-4 transition hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {resendLoading ? "Resending OTP..." : "Resend OTP"}
-            </button>
           </form>
 
-          <p className="mt-5 text-center text-sm text-neutral-600">
-            <Link replace to={`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
+          <p className="mt-5 text-center text-sm text-muted-foreground">
+            <Link
+              replace
+              to={`/forgot-password?returnTo=${encodeURIComponent(returnTo)}`}
+              className="font-semibold text-foreground underline underline-offset-4"
+            >
               Change email
             </Link>
           </p>

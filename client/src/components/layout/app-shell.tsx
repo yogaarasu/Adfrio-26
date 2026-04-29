@@ -6,6 +6,7 @@ import { BottomNav } from "@/components/layout/bottom-nav";
 import { GlobalAudioPlayer } from "@/components/player/global-audio-player";
 import { GlobalVideoPlayer } from "@/components/player/global-video-player";
 import { AuthRequiredDialog } from "@/components/auth/auth-required-dialog";
+import { AuthHeader } from "@/components/auth/auth-header";
 import { cn } from "@/lib/utils";
 import { authApi } from "@/services/api";
 import { useAuthStore } from "@/store/auth-store";
@@ -87,22 +88,35 @@ export const AppShell = () => {
   }, [isAuthRoute, token]);
 
   return (
-    <div className={cn("relative min-h-screen", isAuthRoute ? "text-[#111]" : "bg-background text-foreground")}>
+    <div
+      className={cn(
+        "relative min-h-screen",
+        isAuthRoute
+          ? "bg-background text-foreground"
+          : "bg-background text-foreground"
+      )}
+    >
       {!isAuthRoute ? (
         <>
           <TopNav onMenuToggle={() => setMobileSidebarOpen(true)} />
           <SidebarNav mobileOpen={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} />
         </>
       ) : null}
+      {isAuthRoute ? <AuthHeader /> : null}
       <main
         className={cn(
           "relative z-10 w-full",
           isAuthRoute
-            ? "flex min-h-screen items-center justify-center px-4 py-8 sm:py-12"
+            ? "flex min-h-[calc(100vh-3.5rem)] items-center justify-center px-4 py-6 sm:py-10"
             : "px-4 pb-36 pt-6 md:pb-40 lg:pl-[18rem]"
         )}
       >
-        <div className={cn("mx-auto w-full", isAuthRoute ? "" : "max-w-6xl")}>
+        <div
+          className={cn(
+            "mx-auto w-full",
+            isAuthRoute ? "max-w-5xl" : "max-w-6xl"
+          )}
+        >
           <Outlet />
         </div>
       </main>

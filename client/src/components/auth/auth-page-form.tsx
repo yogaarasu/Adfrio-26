@@ -131,6 +131,8 @@ export const AuthPageForm = ({ mode }: Props) => {
   const [otpDigits, setOtpDigits] = useState<string[]>(Array(4).fill(""));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(60);
   const [googleLoading, setGoogleLoading] = useState(false);
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
   const authSwitchInFlightRef = useRef(false);
@@ -139,8 +141,17 @@ export const AuthPageForm = ({ mode }: Props) => {
     if (isVerify) {
       setEmail(verifyEmail);
       setOtpDigits(Array(4).fill(""));
+      setResendCooldown(60);
     }
   }, [isVerify, verifyEmail]);
+
+  useEffect(() => {
+    if (!isVerify || resendCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendCooldown((value) => (value > 0 ? value - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isVerify, resendCooldown]);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,6 +280,23 @@ export const AuthPageForm = ({ mode }: Props) => {
     }
   };
 
+  const resendSignupOtp = async () => {
+    if (!verifyEmail || resendCooldown > 0 || resendLoading) return;
+    setResendLoading(true);
+    try {
+      await authApi.signupResend(verifyEmail);
+      setOtpDigits(Array(4).fill(""));
+      setErrors((prev) => ({ ...prev, otp: undefined }));
+      setResendCooldown(60);
+      toast.success("New OTP sent to your email.");
+      otpInputRefs.current[0]?.focus();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message ?? "Unable to resend verification code.");
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
   const setOtpDigit = (index: number, nextRaw: string) => {
     const nextChar = nextRaw.replace(/\D/g, "").slice(-1);
     setOtpDigits((prev) => {
@@ -372,29 +400,30 @@ export const AuthPageForm = ({ mode }: Props) => {
     return <Navigate to={returnTo} replace />;
   }
 
+  if (isVerify && !verifyEmail) {
+    return <Navigate replace to={`/sign-up?returnTo=${encodeURIComponent(returnTo)}`} />;
+  }
+
   if (isVerify) {
     return (
       <section className="mx-auto w-full max-w-md">
-        <div className="text-neutral-900">
-          <header className="space-y-1 text-center">
-            <h1 className="text-3xl font-bold tracking-tight">Verify your email</h1>
-            <p className="text-sm text-neutral-600">
-              Enter the OTP sent to <span className="font-medium text-neutral-800">{verifyEmail}</span>
+        <div>
+          <header className="space-y-2 text-center">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Verify your email</h1>
+            <p className="text-sm text-muted-foreground">
+              Enter the OTP sent to <span className="font-semibold text-foreground">{verifyEmail}</span>
             </p>
           </header>
 
           <form
-            className="mt-6 space-y-4"
+            className="mt-6 space-y-5"
             onSubmit={(event) => {
               event.preventDefault();
               void verifySignupOtp();
             }}
           >
             <div className="space-y-1.5">
-              <label htmlFor="otp" className="text-sm font-medium text-neutral-800">
-                OTP
-              </label>
-              <div className="flex items-center justify-between gap-2">
+              <div className="grid grid-cols-4 gap-2 sm:gap-3">
                 {otpDigits.map((digit, index) => (
                   <Input
                     key={`otp-${index}`}
@@ -409,7 +438,7 @@ export const AuthPageForm = ({ mode }: Props) => {
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     maxLength={1}
-                    className="h-11 w-11 rounded-xl border-neutral-300 bg-white p-0 text-center text-lg font-semibold text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900 sm:h-12 sm:w-12"
+                    className="h-12 rounded-2xl border-border/90 bg-card p-0 text-center text-lg font-semibold tracking-[0.04em] text-foreground placeholder:text-muted-foreground focus:border-primary"
                     aria-label={`OTP digit ${index + 1}`}
                     aria-invalid={Boolean(errors.otp)}
                     aria-describedby={errors.otp ? "otp-error" : undefined}
@@ -421,12 +450,24 @@ export const AuthPageForm = ({ mode }: Props) => {
                   {errors.otp}
                 </p>
               ) : null}
+              <button
+                type="button"
+                onClick={() => void resendSignupOtp()}
+                disabled={resendLoading || resendCooldown > 0 || loading}
+                className="w-full pt-1 text-center text-sm font-medium text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                {resendLoading
+                  ? "Resending OTP..."
+                  : resendCooldown > 0
+                    ? `Resend OTP in ${resendCooldown}s`
+                    : "Resend OTP"}
+              </button>
             </div>
 
             <Button
               type="submit"
               disabled={loading}
-              className="h-11 w-full rounded-xl bg-neutral-900 text-white hover:bg-neutral-800"
+              className="h-11 w-full rounded-xl"
             >
               {loading ? (
                 <span className="inline-flex items-center gap-2">
@@ -439,9 +480,13 @@ export const AuthPageForm = ({ mode }: Props) => {
             </Button>
           </form>
 
-          <p className="mt-4 text-center text-sm text-neutral-600">
+          <p className="mt-5 text-center text-sm text-muted-foreground">
             Wrong email?{" "}
-            <Link replace to={`/sign-up?returnTo=${encodeURIComponent(returnTo)}`} className="underline">
+            <Link
+              replace
+              to={`/sign-up?returnTo=${encodeURIComponent(returnTo)}`}
+              className="font-semibold text-foreground underline underline-offset-4"
+            >
               Go back
             </Link>
           </p>
@@ -452,18 +497,18 @@ export const AuthPageForm = ({ mode }: Props) => {
 
   return (
     <section className="mx-auto w-full max-w-md">
-      <div className="text-neutral-900">
-        <header className="space-y-1 text-center">
-          <h1 className="text-3xl font-bold tracking-tight">
-            {isSignUp ? "Register" : "Welcome back"}
+      <div>
+        <header className="space-y-2 text-center">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">
+            {isSignUp ? "Create an Account" : "Welcome back"}
           </h1>
-          <p className="text-sm text-neutral-600">
+          <p className="text-sm text-muted-foreground">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
             <Link
               replace
               to={`${isSignUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`}
               onClick={handleAuthModeSwitch}
-              className="font-medium underline"
+              className="font-semibold text-foreground underline underline-offset-4"
             >
               {isSignUp ? "Login" : "Register"}
             </Link>
@@ -483,7 +528,7 @@ export const AuthPageForm = ({ mode }: Props) => {
         >
           {isSignUp ? (
             <div className="space-y-1.5">
-              <label htmlFor="name" className="text-sm font-medium text-neutral-800">
+              <label htmlFor="name" className="text-sm font-medium text-foreground">
                 Name
               </label>
               <Input
@@ -492,7 +537,7 @@ export const AuthPageForm = ({ mode }: Props) => {
                 value={name}
                 onChange={(event) => setFieldValue(setName, "name")(event.target.value)}
                 autoComplete="name"
-                className="h-11 rounded-xl border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900"
+                className="h-11 rounded-xl border-border/90 bg-card text-foreground placeholder:text-muted-foreground focus:border-primary"
                 aria-invalid={Boolean(errors.name)}
                 aria-describedby={errors.name ? "name-error" : undefined}
               />
@@ -505,7 +550,7 @@ export const AuthPageForm = ({ mode }: Props) => {
           ) : null}
 
           <div className="space-y-1.5">
-            <label htmlFor="email" className="text-sm font-medium text-neutral-800">
+            <label htmlFor="email" className="text-sm font-medium text-foreground">
               Email
             </label>
             <Input
@@ -515,7 +560,7 @@ export const AuthPageForm = ({ mode }: Props) => {
               onChange={(event) => setFieldValue(setEmail, "email")(event.target.value)}
               autoComplete="email"
               type="email"
-              className="h-11 rounded-xl border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900"
+              className="h-11 rounded-xl border-border/90 bg-card text-foreground placeholder:text-muted-foreground focus:border-primary"
               aria-invalid={Boolean(errors.email)}
               aria-describedby={errors.email ? "email-error" : undefined}
             />
@@ -528,13 +573,13 @@ export const AuthPageForm = ({ mode }: Props) => {
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label htmlFor="password" className="text-sm font-medium text-neutral-800">
+              <label htmlFor="password" className="text-sm font-medium text-foreground">
                 Password
               </label>
               {!isSignUp ? (
                 <button
                   type="button"
-                  className="text-xs text-neutral-600 hover:text-neutral-900"
+                  className="text-xs font-medium text-muted-foreground transition hover:text-foreground"
                   onClick={() =>
                     navigate(
                       `/forgot-password?returnTo=${encodeURIComponent(location.pathname + location.search)}`,
@@ -553,7 +598,7 @@ export const AuthPageForm = ({ mode }: Props) => {
               onChange={(event) => setFieldValue(setPassword, "password")(event.target.value)}
               autoComplete={isSignUp ? "new-password" : "current-password"}
               type="password"
-              className="h-11 rounded-xl border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900"
+              className="h-11 rounded-xl border-border/90 bg-card text-foreground placeholder:text-muted-foreground focus:border-primary"
               aria-invalid={Boolean(errors.password)}
               aria-describedby={errors.password ? "password-error" : undefined}
             />
@@ -566,7 +611,7 @@ export const AuthPageForm = ({ mode }: Props) => {
 
           {isSignUp ? (
             <div className="space-y-1.5">
-              <label htmlFor="confirmPassword" className="text-sm font-medium text-neutral-800">
+              <label htmlFor="confirmPassword" className="text-sm font-medium text-foreground">
                 Confirm Password
               </label>
               <Input
@@ -578,7 +623,7 @@ export const AuthPageForm = ({ mode }: Props) => {
                 }
                 autoComplete="new-password"
                 type="password"
-                className="h-11 rounded-xl border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900"
+                className="h-11 rounded-xl border-border/90 bg-card text-foreground placeholder:text-muted-foreground focus:border-primary"
                 aria-invalid={Boolean(errors.confirmPassword)}
                 aria-describedby={errors.confirmPassword ? "confirm-password-error" : undefined}
               />
@@ -593,7 +638,7 @@ export const AuthPageForm = ({ mode }: Props) => {
           <Button
             type="submit"
             disabled={loading}
-            className="h-11 w-full rounded-xl bg-neutral-900 text-white hover:bg-neutral-800"
+            className="h-11 w-full rounded-xl"
           >
             {loading ? (
               <span className="inline-flex items-center gap-2">
@@ -609,16 +654,16 @@ export const AuthPageForm = ({ mode }: Props) => {
         </form>
 
         <div className="my-5 flex items-center gap-3">
-          <div className="h-px flex-1 bg-neutral-200" />
-          <span className="text-xs text-neutral-500">OR CONTINUE WITH</span>
-          <div className="h-px flex-1 bg-neutral-200" />
+          <div className="h-px flex-1 bg-border/80" />
+          <span className="text-xs tracking-[0.14em] text-muted-foreground">OR CONTINUE WITH</span>
+          <div className="h-px flex-1 bg-border/80" />
         </div>
 
         <Button
           onClick={startGoogleOAuth}
           disabled={googleLoading}
           variant="outline"
-          className="h-11 w-full rounded-xl border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50"
+          className="h-11 w-full rounded-xl border-border/90 bg-card/85 text-foreground hover:bg-muted/65"
         >
           <span className="mr-2 inline-flex items-center justify-center">
             <GoogleGIcon />
@@ -626,7 +671,7 @@ export const AuthPageForm = ({ mode }: Props) => {
           {googleLoading ? "Redirecting..." : "Continue with Google"}
         </Button>
 
-        <p className="mt-5 text-center text-xs text-neutral-500">
+        <p className="mt-5 text-center text-xs text-muted-foreground">
           By continuing, you agree to our Terms of Service and Privacy Policy.
         </p>
       </div>
